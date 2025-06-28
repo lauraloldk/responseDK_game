@@ -1,0 +1,285 @@
+<!DOCTYPE html>
+<html lang="da">
+<head>
+  <meta charset="UTF-8">
+  <title>Vagtcentral Spil</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet-routing-machine@3.2.12/dist/leaflet-routing-machine.css" />
+  <style>
+    html, body { margin: 0; padding: 0; }
+    #map { height: 90vh; width: 100%; }
+    #controls { padding: 10px; background: #222; color: white; display: flex; gap: 10px; }
+    button { padding: 6px 12px; border-radius: 6px; border: none; background: #444; color: white; cursor: pointer; }
+    #køretøjsPanel, #statusPanel, #logPanel {
+      position: absolute;
+      top: 60px;
+      left: 10px;
+      background: white;
+      padding: 10px;
+      max-height: 300px;
+      overflow-y: auto;
+      border: 1px solid #888;
+      display: none;
+      z-index: 1000;
+    }
+    .station-ikon {
+      font-size: 16px;
+      font-weight: bold;
+      padding: 6px 10px;
+      border: 3px solid #333;
+      border-radius: 8px;
+      background: white;
+      display: inline-block;
+    }
+  </style>
+</head>
+<body>
+  <div id="controls">
+    <button onclick="aktiverStationsTilstand()">➕ Tilføj Station</button>
+    <button onclick="visKøretøjsPanel()">🚨 Alarmer køretøj</button>
+    <button onclick="visStatusPanel()">📋 Status</button>
+    <button onclick="visMissionLog()">🧾 Mission-log</button>
+  </div>
+  <div id="map"></div>
+  <div id="køretøjsPanel"></div>
+  <div id="statusPanel"></div>
+  <div id="logPanel"></div>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="https://unpkg.com/leaflet-routing-machine@3.2.12/dist/leaflet-routing-machine.min.js"></script>
+  <script>
+    const map = L.map('map').setView([55.6761, 12.5683], 13);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+
+    let stationer = [], alarmer = [], valgteKøretøjer = [], stationsTilstand = false;
+    // Indsæt alarmtyper direkte for at undgå CORS-problemer
+    let alarmTyper = ['Brand', 'Hjertestop', 'Indbrud', 'Ulykke', 'Drab'];
+    let missionLog = [];
+    let alarmLyd = new Audio('https://actions.google.com/sounds/v1/alarms/alarm_clock.ogg');
+
+    function aktiverStationsTilstand() {
+      stationsTilstand = true;
+      alert("Klik på kortet for at placere en station.");
+    }
+
+    function distanceKm(lat1, lon1, lat2, lon2) {
+      const R = 6371, dLat = (lat2 - lat1) * Math.PI / 180, dLon = (lon2 - lon1) * Math.PI / 180;
+      const a = Math.sin(dLat/2)**2 + Math.cos(lat1*Math.PI/180)*Math.cos(lat2*Math.PI/180)*Math.sin(dLon/2)**2;
+      return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+    }
+
+    map.on('click', e => {
+      if (!stationsTilstand) return;
+      const navn = prompt("Navn på station:");
+      if (!navn) return;
+      const marker = L.marker(e.latlng, {
+        icon: L.divIcon({
+          html: `<div class='station-ikon'>🏢 ${navn}</div>`,
+          className: ''
+        })
+      }).addTo(map);
+      const station = { navn, position: e.latlng, marker, køretøjer: [] };
+      station.marker.on('click', () => {
+        const kNavn = prompt("Navn på køretøj:");
+        const type = prompt("Type: brand, ambulance, politi");
+        const k = { navn: kNavn, type, status: 'standby', station };
+        const m = L.marker(e.latlng, { icon: lavIkon(k.status, k.navn) }).addTo(map);
+        k.marker = m;
+        station.køretøjer.push(k);
+      });
+      stationer.push(station);
+      stationsTilstand = false;
+    });
+
+    function lavIkon(status, navn) {
+      let farve = 'lightgreen';
+      if (status === 'undervejs') farve = 'lightblue';
+      else if (status === 'ved alarm') farve = 'red';
+      else if (status === 'på vej hjem') farve = 'yellow';
+      return L.divIcon({ html: `
+        <div style='text-align:center;'>
+          <div style='width:12px;height:12px;background:${farve};border:2px solid #444;margin:auto;border-radius:4px;'></div>
+          <div style='font-size:10px;background:white;color:black;padding:2px 6px;border-radius:4px;margin-top:2px;width:60px;'>${navn}</div>
+        </div>` });
+    }
+
+    function visKøretøjsPanel() {
+      const panel = document.getElementById("køretøjsPanel");
+      if (panel.style.display === 'block') { panel.style.display = 'none'; return; }
+      panel.innerHTML = "<b>Vælg køretøjer:</b><br>";
+      panel.style.display = 'block';
+      valgteKøretøjer = [];
+      stationer.forEach((st, sidx) => {
+        panel.innerHTML += `<hr><b>${st.navn}</b><br>`;
+        st.køretøjer.forEach((k, kidx) => {
+          panel.innerHTML += `<label><input type='checkbox' onchange='toggleKøretøj(${sidx},${kidx})'> ${k.navn} (${k.type})</label><br>`;
+        });
+      });
+      panel.innerHTML += `<br><button onclick='vælgAlarmOgAfsend()'>Afsend valgte</button>`;
+    }
+
+    function toggleKøretøj(s, k) {
+      const køretøj = stationer[s].køretøjer[k];
+      const index = valgteKøretøjer.indexOf(køretøj);
+      if (index > -1) valgteKøretøjer.splice(index, 1);
+      else valgteKøretøjer.push(køretøj);
+    }
+
+    function vælgAlarmOgAfsend() {
+      const panel = document.getElementById("køretøjsPanel");
+      panel.innerHTML = "<b>Vælg alarm til at sende køretøjerne til:</b><br>";
+      if (alarmer.length === 0) {
+        panel.innerHTML += "Ingen aktive alarmer.";
+        return;
+      }
+      alarmer.forEach((alarm, idx) => {
+        panel.innerHTML += `<button onclick='sendKøretøjerTilAlarm(${idx})'>#${alarm.id} - ${alarm.type}</button><br>`;
+      });
+    }
+
+    function visStatusPanel() {
+      const panel = document.getElementById("statusPanel");
+      if (panel.style.display === 'block') { panel.style.display = 'none'; return; }
+      panel.innerHTML = '<b>Status for alle køretøjer:</b><br>';
+      panel.style.display = 'block';
+      stationer.forEach(st => {
+        st.køretøjer.forEach(k => {
+          panel.innerHTML += `${k.navn} (${k.type}) - ${k.status}<br>`;
+        });
+      });
+    }
+
+    function visMissionLog() {
+      const panel = document.getElementById("logPanel");
+      if (panel.style.display === 'block') { panel.style.display = 'none'; return; }
+      panel.innerHTML = '<b>Mission-log:</b><br>';
+      missionLog.forEach(log => {
+        panel.innerHTML += `#${log.alarmId} - ${log.type} - ${log.tid} - Responstid: ${log.responstid} - [${log.køretøjer.join(", ")}]<br>`;
+      });
+    }
+
+    function opdaterKøretøjsIkon(k) {
+      if (k.marker) {
+        k.marker.setIcon(lavIkon(k.status, k.navn));
+      }
+    }
+
+    function sendKøretøjerTilAlarm(alarmIndex) {
+      const alarm = alarmer[alarmIndex];
+      const startTid = Date.now();
+      alarm.aktiveKøretøjer = valgteKøretøjer.length;
+
+      valgteKøretøjer.forEach(k => {
+        if (!k.marker) return;
+        k.status = "undervejs";
+        opdaterKøretøjsIkon(k);
+
+        const routeControl = L.Routing.control({
+          waypoints: [k.marker.getLatLng(), L.latLng(alarm.position.lat, alarm.position.lng)],
+          routeWhileDragging: false,
+          addWaypoints: false,
+          draggableWaypoints: false,
+          createMarker: () => null
+        });
+
+        routeControl.on('routesfound', function (e) {
+          const coords = e.routes[0].coordinates;
+          const stepSize = Math.floor(coords.length / 6);
+          let i = 0;
+
+          const interval = setInterval(() => {
+            if (i >= coords.length) {
+              clearInterval(interval);
+              k.status = "ved alarm";
+              opdaterKøretøjsIkon(k);
+
+              setTimeout(() => {
+                k.status = "på vej hjem";
+                opdaterKøretøjsIkon(k);
+
+                const hjemControl = L.Routing.control({
+                  waypoints: [alarm.position, k.station.position],
+                  routeWhileDragging: false,
+                  addWaypoints: false,
+                  draggableWaypoints: false,
+                  createMarker: () => null
+                });
+
+                hjemControl.on('routesfound', function (e2) {
+                  const hjemCoords = e2.routes[0].coordinates;
+                  const hjemStep = Math.floor(hjemCoords.length / 6);
+                  let j = 0;
+                  const hjemInterval = setInterval(() => {
+                    if (j >= hjemCoords.length) {
+                      clearInterval(hjemInterval);
+                      k.status = "standby";
+                      opdaterKøretøjsIkon(k);
+
+                      alarm.aktiveKøretøjer--;
+                      if (alarm.aktiveKøretøjer <= 0) {
+                        afslutAlarm(alarm, valgteKøretøjer, startTid);
+                      }
+                      return;
+                    }
+                    k.marker.setLatLng(hjemCoords[j]);
+                    j += hjemStep;
+                  }, 10000);
+                });
+
+                hjemControl.route();
+              }, 5000);
+              return;
+            }
+            k.marker.setLatLng(coords[i]);
+            i += stepSize;
+          }, 10000);
+        });
+
+        routeControl.route(); // henter kun data, ingen visning
+      });
+
+      valgteKøretøjer = [];
+      document.getElementById("køretøjsPanel").style.display = 'none';
+    }
+
+    function opretAlarm() {
+      if (stationer.length === 0) return;
+      const s = stationer[0];
+      let lat, lng, dist;
+      do {
+        lat = s.position.lat + (Math.random() - 0.5) * 0.4;
+        lng = s.position.lng + (Math.random() - 0.5) * 0.4;
+        dist = distanceKm(s.position.lat, s.position.lng, lat, lng);
+      } while (dist > 25);
+      const type = alarmTyper[Math.floor(Math.random() * alarmTyper.length)];
+      const id = alarmer.length + 1;
+      const ikonHtml = type === 'Brand' ? `🔥 #${id}` : type === 'Hjertestop' ? `➕ #${id}` : `🚓 #${id}`;
+      const marker = L.marker([lat, lng], {
+        icon: L.divIcon({ html: `<div>${ikonHtml}</div><div style='font-size:10px;'>${type}</div>` })
+      }).addTo(map).on('click', () => {
+        if (confirm("Fjern alarm manuelt?")) {
+          map.removeLayer(marker);
+          alarmer = alarmer.filter(a => a.id !== id);
+        }
+      });
+      alarmer.push({ id, type, position: { lat, lng }, marker });
+      alarmLyd.play().catch(() => {});
+    }
+
+    function afslutAlarm(alarm, køretøjer, startTid) {
+      map.removeLayer(alarm.marker);
+      alarmer = alarmer.filter(a => a.id !== alarm.id);
+      const slutTid = Date.now();
+      missionLog.push({
+        alarmId: alarm.id,
+        type: alarm.type,
+        tid: new Date().toLocaleTimeString(),
+        køretøjer: køretøjer.map(k => k.navn),
+        responstid: ((slutTid - startTid) / 1000).toFixed(1) + ' sek'
+      });
+    }
+
+    setInterval(opretAlarm, 60000);
+  </script>
+</body>
+</html>
