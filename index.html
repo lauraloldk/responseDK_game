@@ -122,6 +122,22 @@
             padding: 4px 8px;
             font-size: 12px;
         }
+        .close-btn { /* Style for the close button in panels */
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            background: none;
+            border: none;
+            font-size: 1.2em;
+            cursor: pointer;
+            color: var(--text);
+            padding: 0;
+            margin: 0;
+        }
+        .close-btn:hover {
+            color: #ff0000;
+        }
+
 
         /* Markør-ikoner */
         .station-ikon {
@@ -203,6 +219,13 @@
             color: var(--link-hover-color);
         }
 
+        /* Ny style til timer visning */
+        #gameTimeDisplay {
+            margin-left: 20px; /* Juster afstand fra knapper */
+            font-weight: bold;
+            color: var(--text);
+        }
+
     </style>
 </head>
 <body>
@@ -222,10 +245,26 @@
             <option value="600000">10 minutter</option>
             <option value="5000">5 sekunder</option>
         </select>
+        <span id="gameTimeDisplay">Tid: 00:00</span>
     </div>
     <div id="map"></div>
     <div id="køretøjsPanel"></div>
-    <div id="statusPanel"></div>
+    <div id="statusPanel">
+        <button class="close-btn" onclick="Game.hideAllPanels()">X</button>
+        <h3>Spil Status</h3>
+        
+        <h4>Aktive Alarmer (<span id="activeAlarmsCount">0</span>)</h4>
+        <ul id="alarmList">
+            </ul>
+
+        <h4>Køretøjer i alt (<span id="totalVehiclesCount">0</span>)</h4>
+        <ul id="vehicleList">
+            </ul>
+
+        <h4>Missions Log</h4>
+        <ul id="missionLogList">
+            </ul>
+    </div>
     <div id="logPanel"></div>
     <div id="stationPanel"></div>
 
@@ -296,10 +335,12 @@
 
                 // Initialiser/opdater statuspaneler med det samme
                 this.updateStatusPanels(); 
-                // Opdater statuspaneler hvert sekund
-                setInterval(() => this.updateStatusPanels(), 1000); 
-                // Inkrementer spilletid (hvert sekund = 1 game-sekund)
-                setInterval(() => this.gameTime++, 1000);
+                // Opdater spilletid hvert sekund
+                // Rettet: Nu opdateres _kun_ spilletiden her, og Game.updateStatusPanels kaldes kun, når UI kræver det.
+                setInterval(() => {
+                    this.gameTime++;
+                    this.updateGameTimeDisplay(); // Ny funktion til kun at opdatere tiden
+                }, 1000);
             },
 
             activateStationMode: function() {
@@ -373,7 +414,10 @@
 
             chooseAlarmAndDispatch: function() {
                 const panel = document.getElementById("køretøjsPanel");
-                panel.innerHTML = "<b>Vælg alarm til at sende køretøjerne til:</b><br>";
+                panel.innerHTML = `
+                    <button class="close-btn" onclick="Game.hideAllPanels()">X</button>
+                    <b>Vælg alarm til at sende køretøjerne til:</b><br>
+                `;
                 if (this.alarms.length === 0) { 
                     panel.innerHTML += "Ingen aktive alarmer.";
                     return;
@@ -394,17 +438,17 @@
             // --- NY FUNKTION: Opdaterer alle statuspaneler ---
             updateStatusPanels: function() {
                 // Opdater alarm liste
-                const alarmList = document.querySelector('#statusPanel ul:nth-of-type(1)'); // Første UL i statusPanel
+                const alarmList = document.getElementById('alarmList');
                 alarmList.innerHTML = '';
                 this.alarms.forEach(alarm => {
                     const listItem = document.createElement('li');
-                    listItem.innerHTML = `Alarm #${alarm.id}: ${alarm.type}`; // Brug innerHTML hvis du vil formatere mere
+                    listItem.innerHTML = `Alarm #${alarm.id}: ${alarm.type}`;
                     alarmList.appendChild(listItem);
                 });
-                document.querySelector('#statusPanel h4:nth-of-type(1) span').textContent = this.alarms.length; // Opdater tæller
+                document.getElementById('activeAlarmsCount').textContent = this.alarms.length;
 
                 // Opdater køretøjsliste MED KLIKBART STATIONSNAVN
-                const vehicleList = document.querySelector('#statusPanel ul:nth-of-type(2)'); // Anden UL i statusPanel
+                const vehicleList = document.getElementById('vehicleList');
                 vehicleList.innerHTML = '';
                 let totalVehicles = 0;
                 this.stations.forEach(station => {
@@ -420,10 +464,10 @@
                         vehicleList.appendChild(listItem);
                     });
                 });
-                document.querySelector('#statusPanel h4:nth-of-type(2) span').textContent = totalVehicles; // Opdater tæller
+                document.getElementById('totalVehiclesCount').textContent = totalVehicles;
 
                 // Opdater missionslog
-                const missionLogList = document.querySelector('#statusPanel ul:nth-of-type(3)'); // Tredje UL i statusPanel
+                const missionLogList = document.getElementById('missionLogList');
                 missionLogList.innerHTML = '';
                 this.missionLog.forEach(log => {
                     const listItem = document.createElement('li');
@@ -431,10 +475,18 @@
                     missionLogList.appendChild(listItem);
                 });
 
-                // Opdater spilletid
+                // Opdater spilletid (flyttet til separat funktion for at undgå fejl)
+                this.updateGameTimeDisplay();
+            },
+
+            // Ny funktion til kun at opdatere spilletiden
+            updateGameTimeDisplay: function() {
                 const minutes = Math.floor(this.gameTime / 60);
                 const seconds = this.gameTime % 60;
-                document.querySelector('#controls div:first-child').textContent = `Tid: ${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+                const gameTimeElement = document.getElementById('gameTimeDisplay');
+                if (gameTimeElement) { // Tjek om elementet eksisterer, før du opdaterer
+                    gameTimeElement.textContent = `Tid: ${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+                }
             }
         };
 
