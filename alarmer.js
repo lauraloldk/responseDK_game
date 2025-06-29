@@ -1,5 +1,5 @@
 // alarmer.js
-
+let nextAlarmId = 1; // Denne tæller skal kun tælle opad.
 const alarmTypes = [
     "Bygningsbrand (Villa/Rækkehus)", "Skovbrand", "Affaldsbrand", "Industri- og fabriksbrand", "Brand i erhvervsbygning",
     "Fritstående bygning – brand", "Brand i kælder", "Bilbrand", "Brand i container", "Brand i maskinhus", "Elbrand", 
@@ -129,29 +129,59 @@ const alarmTypes = [
     "Vagt har brug for backup", "Alarm for pengeskab", "Overfald på ansat", "Hærværk på toilet", "Strømsvigt i overvågning"
 ];
 
-function createAlarm(stations, alarmsArray, alarmSound, spawnRadiusKm) { // Added spawnRadiusKm parameter
+/**
+ * Opretter en ny alarm på kortet.
+ * @param {Array<Object>} stations - Array af alle stationer.
+ * @param {Array<Object>} alarmsArray - Det globale array, der indeholder alle aktive alarmer (Game.alarms).
+ * @param {HTMLAudioElement} alarmSound - Lyden der skal afspilles ved ny alarm.
+ * @param {number} spawnRadiusKm - Radius i km omkring en station, hvor alarmen kan opstå.
+ */
+function createAlarm(stations, alarmsArray, alarmSound, spawnRadiusKm) { 
     if (stations.length === 0) return;
 
     const randomStationIndex = Math.floor(Math.random() * stations.length);
     const station = stations[randomStationIndex];
 
     let lat, lng, dist;
+    // Sikrer at alarmen spawnes inden for den specificerede radius
     do {
-        lat = station.position.lat + (Math.random() - 0.5) * (spawnRadiusKm / 111.32); // Approx degrees per KM
+        lat = station.position.lat + (Math.random() - 0.5) * (spawnRadiusKm / 111.32); // Ca. grader pr. KM
         lng = station.position.lng + (Math.random() - 0.5) * (spawnRadiusKm / (111.32 * Math.cos(station.position.lat * Math.PI / 180)));
         dist = distanceKm(station.position.lat, station.position.lng, lat, lng);
-    } while (dist > spawnRadiusKm); // Use the new parameter here
+    } while (dist > spawnRadiusKm);
 
     const type = alarmTypes[Math.floor(Math.random() * alarmTypes.length)];
-    const id = alarmsArray.length + 1;
+    // Bruger den globale, inkrementerende tæller for unikke ID'er
+    const id = nextAlarmId++; 
     
-    const alarm = { id, type, position: { lat, lng }, marker: null, activeVehicles: 0 };
-    alarm.marker = createAlarmMarker({ lat, lng }, id, type, alarm);
+    const alarm = { 
+        id, 
+        type, 
+        position: { lat, lng }, 
+        marker: null, 
+        dispatchedVehiclesCount: 0, // NY: Tæller sendte køretøjer til denne alarm
+        resolvedVehiclesCount: 0,  // NY: Tæller ankomne køretøjer til denne alarm
+        creationTime: Game.gameTime // NY: Gemmer spiltidspunktet for alarmens oprettelse
+    };
+    // Antager createAlarmMarker funktionen er defineret et andet sted (f.eks. map.js)
+    alarm.marker = createAlarmMarker({ lat, lng }, id, type, alarm); 
     
     alarmsArray.push(alarm);
-    alarmSound.play().catch(() => {});
+    alarmSound.play().catch(() => {}); // Afspiller alarmlyd, fanger fejl hvis lyden ikke kan afspilles
+    Game.updateStatusPanels(); // Vigtigt: Opdater UI når en ny alarm er oprettet
 }
 
+/**
+ * Sender de valgte køretøjer til en given alarm og animerer deres bevægelse.
+ * @param {Object} alarm - Alarmobjektet køretøjerne skal sendes til.
+ * @param {Array<Object>} vehiclesToSend - Array af køretøjsobjekter, der skal sendes.
+ * @param {L.Map} mapInstance - Leaflet kortinstansen.
+ * @param {number} refreshInterval - Interval (ms) for opdatering af køretøjets position.
+ * @param {number} standardTravelTime - Standard rejsetid i sekunder (bruges til at simulere hastighed).
+ * @param {Array<Object>} allStations - Reference til alle stationer (bruges til Game.stations).
+ * @param {Array<Object>} allAlarms - Reference til alle aktive alarmer (bruges til Game.alarms).
+ * @param {Array<Object>} missionLog - Reference til missionsloggen.
+ */
 function sendVehiclesToAlarm(
     alarm, 
     vehiclesToSend, 
@@ -162,16 +192,19 @@ function sendVehiclesToAlarm(
     allAlarms, 
     missionLog
 ) {
-    const startTime = Date.now();
+    // Inkrementer tælleren for sendte køretøjer på alarm-objektet.
+    // Dette skal gøres én gang for hele batchen af køretøjer, der udsendes til alarmen.
+    alarm.dispatchedVehiclesCount += vehiclesToSend.length; 
     
     vehiclesToSend.forEach(vehicle => {
         if (!vehicle.marker) return;
 
         vehicle.status = "undervejs";
-        vehicle.alarm = alarm; 
-        updateVehicleMarkerIcon(vehicle); 
+        vehicle.alarm = alarm; // Sæt en reference til den alarm, køretøjet kører til
+        vehicle.lastDispatchedAlarmId = alarm.id; // Ny: Gem ID'et for den senest udsendte alarm på køretøjet.
+        updateVehicleMarkerIcon(vehicle); // Antager updateVehicleMarkerIcon er defineret
 
-        // Fjern tidligere rute, hvis den eksisterer
+        // Fjern tidligere rute, hvis den eksisterer (sikkerhedsforanstaltning)
         if (vehicle.routeControl) { 
             mapInstance.removeControl(vehicle.routeControl);
             vehicle.routeControl = null; 
@@ -183,8 +216,8 @@ function sendVehiclesToAlarm(
             routeWhileDragging: false,
             addWaypoints: false,
             draggableWaypoints: false,
-            createMarker: () => null, // Undgå standardmarkører
-            lineOptions: { styles: [] }, // Ingen visuelle linjer!
+            createMarker: () => null, // Ingen standardmarkører fra routeren
+            lineOptions: { styles: [] }, // Ingen visuelle linjer for ruten
             show: false // Skjul rutevejledningspanelet
         });
         
@@ -193,10 +226,8 @@ function sendVehiclesToAlarm(
 
         routeControl.on('routesfound', function (e) {
             const coords = e.routes[0].coordinates;
-            // Beregn antal opdateringer baseret på ønsket rejsetid og refreshInterval
-            // Vi bruger stadig standardTravelTime for at bestemme hastigheden
             const routeLengthMeters = e.routes[0].summary.totalDistance;
-            const simulatedSpeedMps = routeLengthMeters / standardTravelTime; // Meters per second
+            const simulatedSpeedMps = routeLengthMeters / standardTravelTime; 
             const totalAnimationDurationMs = (routeLengthMeters / simulatedSpeedMps) * 1000;
 
             const numSteps = Math.ceil(totalAnimationDurationMs / refreshInterval);
@@ -206,32 +237,36 @@ function sendVehiclesToAlarm(
 
             const interval = setInterval(() => {
                 if (i >= coords.length) {
-                    clearInterval(interval);
+                    clearInterval(interval); // Stop animationen
                     vehicle.status = "ved alarm";
                     updateVehicleMarkerIcon(vehicle);
 
+                    // Fjern rute-kontrollen fra kortet, når køretøjet er fremme
                     if (vehicle.routeControl) {
                         mapInstance.removeControl(vehicle.routeControl);
                         vehicle.routeControl = null;
                     }
 
-                    resolveAlarm(alarm, [vehicle], startTime, allAlarms, allStations, mapInstance, missionLog);
-                    vehicle.alarm = null; 
-
-                    // Simulerer tid ved alarm, før den kører hjem
+                    // NYT: Inkrementer tælleren for ankomne køretøjer på alarm-objektet
+                    alarm.resolvedVehiclesCount++;
+                    // NYT: Tjek om alarmen skal løses, nu hvor endnu et køretøj er ankommet
+                    // `alarm.creationTime` sikrer, at vi bruger det oprindelige tidspunkt for logning.
+                    checkAndResolveAlarmIfAllArrived(alarm, allAlarms, missionLog, alarm.creationTime, mapInstance);
+                    
+                    // Simulerer tid ved alarmsted, før den kører hjem
                     setTimeout(() => { 
                         vehicle.status = "på vej hjem"; 
                         updateVehicleMarkerIcon(vehicle);
 
                         // --- RUTE HJEM ---
                         const homeControl = L.Routing.control({
-                            waypoints: [alarm.position, vehicle.station.position],
+                            waypoints: [alarm.position, vehicle.station.position], // Fra alarm til hjemstation
                             routeWhileDragging: false,
                             addWaypoints: false,
                             draggableWaypoints: false,
-                            createMarker: () => null, // Undgå standardmarkører
-                            lineOptions: { styles: [] }, // Ingen visuelle linjer!
-                            show: false // Skjul rutevejledningspanelet
+                            createMarker: () => null, 
+                            lineOptions: { styles: [] }, 
+                            show: false 
                         });
                         vehicle.routeControl = homeControl; 
                         homeControl.addTo(mapInstance);
@@ -248,21 +283,24 @@ function sendVehiclesToAlarm(
                             let j = 0;
                             const homeInterval = setInterval(() => {
                                 if (j >= homeCoords.length) {
-                                    clearInterval(homeInterval);
+                                    clearInterval(homeInterval); // Stop hjem-animationen
                                     vehicle.status = "standby"; 
                                     updateVehicleMarkerIcon(vehicle);
+                                    vehicle.marker.setLatLng(vehicle.station.position); // Sørg for den ender præcis på stationen
                                     if (vehicle.routeControl) { 
                                         mapInstance.removeControl(vehicle.routeControl);
                                         vehicle.routeControl = null;
                                     }
+                                    vehicle.alarm = null; // Fjerner alarm-referencen når køretøjet er hjemme
+                                    vehicle.lastDispatchedAlarmId = null; // Nulstil den sidste alarm-ID
                                     return;
                                 }
                                 vehicle.marker.setLatLng(homeCoords[j]);
                                 j += homeStepIndexIncrement;
                             }, refreshInterval); 
                         });
-                        homeControl.route();
-                    }, Math.floor(Math.random() * (300000 - 5000 + 1)) + 5000); // Mellem 5 sek og 5 min ved alarm
+                        homeControl.route(); // Start ruten hjem
+                    }, Math.floor(Math.random() * (300000 - 5000 + 1)) + 5000); // Simulerer tid ved alarm: Mellem 5 sek og 5 min
                     return;
                 }
                 vehicle.marker.setLatLng(coords[i]);
@@ -270,12 +308,51 @@ function sendVehiclesToAlarm(
             }, refreshInterval); 
         });
 
-        routeControl.route(); // Start ruten
+        routeControl.route(); // Start ruten til alarmen for dette køretøj
     });
+    Game.updateStatusPanels(); // Opdater UI med det samme, når køretøjer er sendt
 }
 
+/**
+ * Tjekker om alle sendte køretøjer er ankommet til en alarm, og løser alarmen, hvis de er.
+ * Dette er nu ansvarligt for at kalde `resolveAlarm` korrekt.
+ * @param {Object} alarm - Alarmobjektet der skal tjekkes.
+ * @param {Array<Object>} allAlarms - Reference til Game.alarms.
+ * @param {Array<Object>} missionLog - Reference til missionsloggen.
+ * @param {number} alarmCreationTime - Spilletidspunktet da alarmen blev oprettet.
+ * @param {L.Map} mapInstance - Leaflet kortinstansen.
+ */
+function checkAndResolveAlarmIfAllArrived(alarm, allAlarms, missionLog, alarmCreationTime, mapInstance) {
+    // Find den faktiske alarm i Game.alarms arrayet for at sikre, vi arbejder på den korrekte reference
+    const actualAlarm = allAlarms.find(a => a.id === alarm.id);
 
-function resolveAlarm(alarm, vehicles, startTime, allAlarms, allStations, mapInstance, missionLog) {
+    if (actualAlarm && actualAlarm.dispatchedVehiclesCount === actualAlarm.resolvedVehiclesCount) {
+        // Alle køretøjer, der blev sendt til denne alarm, er nu ankommet til alarmstedet.
+        // Nu kan alarmen betragtes som løst.
+
+        // Find alle køretøjer, der blev sendt til netop denne alarm (bruger lastDispatchedAlarmId)
+        const vehiclesInvolved = Game.stations.flatMap(s => s.køretøjer)
+                                              .filter(v => v.lastDispatchedAlarmId === actualAlarm.id);
+        
+        resolveAlarm(actualAlarm, vehiclesInvolved, alarmCreationTime, allAlarms, mapInstance, missionLog);
+        
+        // Nulstil tællerne for denne alarm efter den er løst (ikke strengt nødvendigt, da alarmen fjernes, men god praksis)
+        actualAlarm.dispatchedVehiclesCount = 0;
+        actualAlarm.resolvedVehiclesCount = 0;
+    }
+}
+
+/**
+ * Fjerner en alarm fra kortet og loggen. Dette kaldes kun, når en alarm er fuldt løst
+ * af alle udsendte køretøjer, eller manuelt.
+ * @param {Object} alarm - Alarmobjektet der skal løses.
+ * @param {Array<Object>} vehicles - Array af køretøjer, der løste denne alarm (til logning).
+ * @param {number} alarmCreationTime - Spilletidspunktet da alarmen blev oprettet.
+ * @param {Array<Object>} allAlarms - Reference til Game.alarms.
+ * @param {L.Map} mapInstance - Leaflet kortinstansen.
+ * @param {Array<Object>} missionLog - Reference til missionsloggen.
+ */
+function resolveAlarm(alarm, vehicles, alarmCreationTime, allAlarms, mapInstance, missionLog) {
     // Fjern alarmmarkøren fra kortet
     if (alarm.marker) {
         mapInstance.removeLayer(alarm.marker);
@@ -287,30 +364,29 @@ function resolveAlarm(alarm, vehicles, startTime, allAlarms, allStations, mapIns
         allAlarms.splice(alarmIndex, 1);
     }
 
-    const endTime = Date.now();
+    // Beregn responstid baseret på spilletid
+    const responseTimeInSeconds = Game.gameTime - alarmCreationTime; 
+    const formattedResponseTime = formatTime(responseTimeInSeconds); // Bruger den globale formatTime funktion
+
+    // Tilføj mission til loggen
     missionLog.push({
         alarmId: alarm.id,
         type: alarm.type,
-        time: new Date().toLocaleTimeString(),
+        time: formatTime(Game.gameTime), // Brug spilletid for log
         vehicles: vehicles.map(k => k.navn),
-        responseTime: ((endTime - startTime) / 1000).toFixed(1) + ' sek'
+        responseTime: formattedResponseTime
     });
 
-    allStations.forEach(st => {
-        st.køretøjer.forEach(k => {
-            if (k.alarm && k.alarm.id === alarm.id) {
-                // Skulle allerede være fjernet i animate-logikken, men en ekstra sikkerhed
-                if (k.routeControl) { 
-                    mapInstance.removeControl(k.routeControl);
-                    k.routeControl = null;
-                }
-                k.alarm = null;
-            }
-        });
-    });
+    // Køretøjerne håndterer selv deres rute hjem og statusopdateringer i sendVehiclesToAlarm's logik.
+    // Vi behøver ikke at nulstille køretøjer her, da de stadig kan være på vej hjem.
+    
+    Game.updateStatusPanels(); // Vigtigt: Opdater UI når en alarm er løst
 }
 
-
+/**
+ * Muliggør manuel fjernelse af en alarm.
+ * @param {Object} alarmToResolve - Alarmobjektet der skal fjernes manuelt.
+ */
 function resolveAlarmManually(alarmToResolve) {
     if (confirm(`Fjern alarm #${alarmToResolve.id}: ${alarmToResolve.type} manuelt?`)) {
         const alarmIndex = Game.alarms.findIndex(a => a.id === alarmToResolve.id);
@@ -324,13 +400,14 @@ function resolveAlarmManually(alarmToResolve) {
             Game.missionLog.push({
                 alarmId: alarm.id,
                 type: alarm.type,
-                time: new Date().toLocaleTimeString(),
-                vehicles: [], 
+                time: formatTime(Game.gameTime), // Brug Game.gameTime for log
+                vehicles: [], // Ingen køretøjer logges som årsag til manuel løsning
                 responseTime: "Manuelt afsluttet"
             });
 
-            Game.alarms.splice(alarmIndex, 1);
+            Game.alarms.splice(alarmIndex, 1); // Fjern alarmen fra listen
 
+            // Nulstil status for køretøjer, der var på vej til den manuelt lukkede alarm
             Game.stations.forEach(st => {
                 st.køretøjer.forEach(k => {
                     if (k.alarm && k.alarm.id === alarmToResolve.id) {
@@ -338,24 +415,56 @@ function resolveAlarmManually(alarmToResolve) {
                             Game.map.removeControl(k.routeControl); 
                             k.routeControl = null;
                         }
-                        k.alarm = null;
-                        k.status = 'standby'; 
+                        k.status = 'standby'; // Sæt direkte til standby
+                        k.marker.setLatLng(k.station.position); // Flyt direkte til stationen
+                        k.alarm = null; // Fjerner alarm reference
+                        k.lastDispatchedAlarmId = null; // Nulstil den sidste alarm-ID
                         updateVehicleMarkerIcon(k); 
                     }
                 });
             });
+            Game.updateStatusPanels(); // Opdater UI efter manuel løsning
         }
     }
 }
 
+/**
+ * Beregner afstanden mellem to geografiske punkter i kilometer.
+ * @param {number} lat1 - Breddegrad for punkt 1.
+ * @param {number} lon1 - Længdegrad for punkt 1.
+ * @param {number} lat2 - Breddegrad for punkt 2.
+ * @param {number} lon2 - Længdegrad for punkt 2.
+ * @returns {number} Afstanden i kilometer.
+ */
 function distanceKm(lat1, lon1, lat2, lon2) {
-    const R = 6371; // Radius of Earth in kilometers
+    const R = 6371; // Radius af Jorden i kilometer
     const dLat = (lat2 - lat1) * Math.PI / 180;
     const dLon = (lon2 - lon1) * Math.PI / 180;
     const a = 
         Math.sin(dLat / 2) * Math.sin(dLat / 2) +
         Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLon / 2) * Math.sin(dLon / 2);
     const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-    const d = R * c; // Distance in km
+    const d = R * c; // Afstand i km
     return d;
 }
+
+/**
+ * Hjælpefunktion til at formatere totalt antal sekunder til 'MM:SS' format.
+ * (Denne funktion skal være tilgængelig globalt eller i en utils.js fil)
+ * @param {number} totalSeconds - Det samlede antal sekunder.
+ * @returns {string} Formatteret tid i MM:SS format.
+ */
+function formatTime(totalSeconds) {
+    const minutes = Math.floor(totalSeconds / 60);
+    const seconds = Math.floor(totalSeconds % 60); // Brug Math.floor, da sekunder kan være flydende tal
+    return `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+}
+
+// Bemærk:
+// - createAlarmMarker(latlng, id, type, alarmObject)
+// - updateVehicleMarkerIcon(vehicle)
+// - getRandomAlarmType() // Bruges i createAlarm, men den hardcoded liste her betyder den ikke nødvendigvis er nødvendig
+// - getRandomLocationNearStations(stations, radius) // Kan erstattes af logikken i createAlarm
+
+// Disse funktioner skal enten inkluderes direkte i denne fil, 
+// eller være tilgængelige fra andre script-filer, der er indlæst før denne.
