@@ -21,6 +21,9 @@
             --button-bg: #ffffff;
             --button-hover: #f0f0f0;
             --button-border: #ccc;
+            --danger-button-bg: #f44336;
+            --danger-button-hover: #d32f2f;
+            --danger-button-text: white;
         }
         body.dark {
             --bg: #121212;
@@ -30,6 +33,9 @@
             --button-bg: #2a2a2a;
             --button-hover: #333;
             --button-border: #555;
+            --danger-button-bg: #cc2f2f;
+            --danger-button-hover: #a02525;
+            --danger-button-text: #f0f0f0;
         }
         #map {
             height: 90vh;
@@ -61,7 +67,16 @@
         button:hover, select:hover {
             background: var(--button-hover);
         }
-        #køretøjsPanel, #statusPanel, #logPanel {
+        .danger-button {
+            background-color: var(--danger-button-bg);
+            color: var(--danger-button-text);
+            border-color: var(--danger-button-bg);
+        }
+        .danger-button:hover {
+            background-color: var(--danger-button-hover);
+        }
+
+        #køretøjsPanel, #statusPanel, #logPanel, #stationPanel {
             position: absolute;
             top: 70px;
             left: 20px;
@@ -75,7 +90,33 @@
             z-index: 1002;
             border: 1px solid var(--border);
             color: var(--text);
+            min-width: 250px;
         }
+        #stationPanel h3 {
+            margin-top: 0;
+            margin-bottom: 10px;
+            color: var(--text);
+        }
+        #stationPanel .station-actions button {
+            margin-bottom: 10px;
+            width: 100%;
+        }
+        #stationPanel .vehicle-list div {
+            padding: 5px 0;
+            border-bottom: 1px dashed var(--border);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        #stationPanel .vehicle-list div:last-child {
+            border-bottom: none;
+        }
+        #stationPanel .vehicle-actions button {
+            margin-left: 5px;
+            padding: 4px 8px;
+            font-size: 12px;
+        }
+
         .station-ikon {
             font-size: 16px;
             font-weight: 600;
@@ -85,6 +126,7 @@
             background: var(--panel);
             color: var(--text);
             display: inline-block;
+            white-space: nowrap;
         }
         .blink-lampe {
             width: 14px;
@@ -109,13 +151,13 @@
 </head>
 <body>
     <div id="controls">
-        <button onclick="aktiverStationsTilstand()">➕ Tilføj Station</button>
-        <button onclick="visKøretøjsPanel()">🚨 Alarmer køretøj</button>
-        <button onclick="visStatusPanel()">📋 Status</button>
-        <button onclick="toggleStationer()">🏢 Vis/Skjul stationer</button>
-        <button onclick="toggleTema()">🌓 Skift tema</button>
+        <button onclick="Game.activateStationMode()">➕ Tilføj Station</button>
+        <button onclick="Game.showVehicleSelectionPanel()">🚨 Alarmer køretøj</button>
+        <button onclick="Game.showStatusPanel()">📋 Status</button>
+        <button onclick="Game.toggleStationsVisibility()">🏢 Vis/Skjul stationer</button>
+        <button onclick="Game.toggleTheme()">🌓 Skift tema</button>
         <label for="intervalVælger">⏱️ Alarm-interval:</label>
-        <select id="intervalVælger" onchange="opdaterAlarmInterval()">
+        <select id="intervalVælger" onchange="Game.updateAlarmInterval()">
             <option value="60000">1 minut</option>
             <option value="120000" selected>2 minutter</option>
             <option value="300000">5 minutter</option>
@@ -127,402 +169,200 @@
     <div id="køretøjsPanel"></div>
     <div id="statusPanel"></div>
     <div id="logPanel"></div>
+    <div id="stationPanel"></div>
 
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script src="https://unpkg.com/leaflet-routing-machine@3.2.12/dist/leaflet-routing-machine.min.js"></script>
+    
+    <script src="map.js"></script>
+    <script src="stationer.js"></script>
+    <script src="alarmer.js"></script>
+
     <script>
-        const map = L.map('map').setView([55.6761, 12.5683], 13);
-        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+        // Hoved Game objekt for at orkestrere de forskellige moduler
+        const Game = {
+            map: null,
+            stations: [],
+            alarms: [],
+            selectedVehicles: [],
+            stationModeActive: false,
+            selectedStation: null,
+            alarmSound: new Audio('https://actions.google.com/sounds/v1/alarms/alarm_clock.ogg'),
+            alarmTimer: null,
+            missionLog: [],
 
-        let stationer = [], alarmer = [], valgteKøretøjer = [], stationsTilstand = false;
-        const alarmTyper = [
-            "Bygningsbrand (Villa/Rækkehus)", "Skovbrand", "Affaldsbrand", "Industri- og fabriksbrand", "Brand i erhvervsbygning",
-            "Fritstående bygning – brand", "Brand i kælder", "Bilbrand", "Brand i container", "Brand i maskinhus", "Elbrand", 
-            "Brand i affaldscontainer", "Brand på tag", "Brand i skur", "Hedebrand", "Brand i stald", "Brand i landbrugsbygning", 
-            "Brand i campingvogn", "Brand i båd", "Brand på vej", "Gaseksplosion", "Brand i traktor", "Brand i tog", 
-            "Eksplosion i industri", "Brand på fabrik", "Brand på containerterminal", "Brand i motorcykel", "Menneskelig fejl ved brand", 
-            "Brand i silo", "Brand på parkeringsplads", "Brand i tømmerlager", "Brand i offentligt toilet", "Brand i lejlighed", 
-            "Brand i restaurant", "Brand på byggeplads", "Brand i højhus", "Brand på lufthavn", "Brand på skib", "Brand i gasværk", 
-            "Brand i græsmark", "Brand i industribygning", "Brand i fjernvarme", "Brand i teknikrum", "Brand på station", 
-            "Brand på rasteplads", "Brand i højhus", "Brand i stuehus", "Brand i lastbil", "Brand i maskinerum", "Brand på motorvej", 
-            "Brand i telefonkiosk", "Brand i containerpark", "Brud på gasledning", "Brand i skovrydning", "Brand i trafikskilt", 
-            "Brand i havn", "Brand i betongulv", "Brand på helikopter", "Brand i samlingshus", "Brand i daginstitution", 
-            "Brand på rasteplads", "Brand i skolebygning", "Brand i el-tavle", "Brand på sportshal", "Brand i kulturhus", 
-            "Brand i brokonstruktion", "Brand i brohus", "Brand i transformerstation", "Brand i stengrå område", "Brand i lysmast", 
-            "Brand i bunker", "Brand i butikslager", "Brand i underjordisk garage", "Brand på autobahn", "Brand på affaldsplads", 
-            "Brand på loft", "Brand i bunker", "Brand på tankstation", "Brand på arbejdsplads", "Brand i bygning med kemikalier", 
-            "Brand på fritidshusområde", "Brand i skovområde", "Brand i industrikøkken", "Brand i brandstation", "Brand i jernbaneoverskæring", 
-            "Brand i værksted", "Brand i bygningskonstruktion", "Brand i vejledningstelt", "Brand i industripark", "Brand på metrostation", 
-            "Brand på lufthavnsområde", "Brand i kraftværk", "Brand i affaldsdepot", "Brand i cykelskure", "Brand i containerby", 
-            "Brand på flisearbejde", "Brand i maritimt område", "Brand i psykiatrisk afdeling", "Brand i dyrepark", "Brand i kemisk lager", 
-            "Ambulanceudkald", "Hjertestop", "Hjerneskader", "Hovedtraume", "Trafikulykke", "Faldulykke", "Kvælning", "Forgiftning", 
-            "Åndedrætsbesvær", "Svimmelhed/Bevidstløshed", "Akut mavesmerter", "Allergisk reaktion", "Astmaanfald", "Hjerteanfald", 
-            "Blødning – ekstern", "Komplikation ved fødsel", "Børneulykke", "Børneskader", "Væsketab (dehydrering)", 
-            "Diabetesrelateret nødsituation", "Epileptisk anfald", "Tågehæmning (hjerneblødning)", "Slagtilfælde", 
-            "Ulykke på arbejdspladsen", "Våd ulykke (vandskader)", "Løbende feber", "Hjerteløs genoplivning", 
-            "Almindelig skader i hjemmet", "Overdosis", "Graviditetsrelateret nødsituation", "Pludselig feberkrampe", 
-            "Hjerteproblemer", "Høj feber hos spædbarn", "Akut rygsmerte", "Ulykke med brud", "Miste bevidsthed", 
-            "Akut sygdom – uspecificeret", "Børnefødselsproblemer", "Synkope (pludselig besvimelse)", "Ødelagt led (f.eks. skulder, albue)", 
-            "Amputation", "Alvorlig forbrænding", "Bidskader", "Dyb stikskade", "Graviditet og fødsel", "Smerter i brystet", 
-            "Bevidstløshed efter stød", "Trafikuheld med personskader", "Børneekstremforgiftning", "Blindtarmsbetændelse", 
-            "Ødelagte organer (f.eks. indre organer)", "Overophedning (hedebølge)", "Feberanfald", "Koldbrand", "Venøs trombose", 
-            "Bevidstløshed ved fald", "Kørsel af fejlinformation", "Hjernekrise", "Svær dehydrering", "Forstoppelse", 
-            "Ortopædisk skade", "Behandling af sårinfektion", "Blodprop i lungerne", "Svært åndedrætsbesvær", "Hjernemisdannelse", 
-            "Smerter i kæben", "Lammelse", "Fysiologisk chok", "Blod i opkast", "Blødning i munden", "Ulykke med elektrisk stød", 
-            "Fejlbehandling ved pilleindtag", "Uventet fødsel", "Urinvejsinfektion", "Ødelagt lårben", "Kræftrelateret nød", 
-            "Ødelagt rygsøjle", "Ødelagt håndled", "Hjernerystelse", "Akut lungebetændelse", "Alvorlig betændelse", 
-            "Politiudkald", "Røveri", "Indbrud", "Overfald", "Vold", "Vandalism", "Tyveri", "Biltyveri", "Indbrud i butik", 
-            "Maskeret forbrydelse", "Ulykke med alvorlig personskade", "Voldtægt", "Trafikulykke (drab, mistænkeligt)", 
-            "Bombetrussel", "Husrøveri", "Kørsel under påvirkning", "Kørsel uden førerret", "Hjemmeinvasion", "Narkotikahandel", 
-            "Tyveri fra butik", "Mistænkelig aktivitet", "Brandstiftelse", "Hærværk", "Trafikkontroller", 
-            "Håndtering af psykisk syg person", "Personer på flugt", "Forbrydelse i offentlig transport", 
-            "Larm fra offentlige områder", "Misbrug af våben", "Låst dør eller sikkerhedslås", "Ulovlig samling", 
-            "Uroligheder i offentlig transport", "Mistænkt iakttagelse af forbrydelse", "Angreb på offentlig ansatte", 
-            "Misbrug af alkohol", "Trusselsituation", "Smugling af varer", "Svindel med penge", "Ulovlig parkering", 
-            "Misbrug af offentlig orden", "Varmgang på arbejdspladsen", "Ulykke ved offentlig institution", 
-            "Elektronisk tyveri", "Overvågning af mistænkte", "Hvidvaskning af penge", "Spionage", 
-            "Kriminalitet i offentlig transport", "Misbrug af midler", "Vold i skoler og institutioner", 
-            "Trusler mod ansatte", "Uro i boligområde", "Hærværk på offentlig bygning", "Sabotage", 
-            "Organiseret kriminalitet", "Bilbrænding", "Ulovlige demonstrationer", "Indbrud i køretøj", 
-            "Mistænkeligt udenlandsk køb", "Forsøg på vold", "Uorden på offentlige steder", "Ulovlig indrejse", 
-            "Svindel i bankforretninger", "Forbrydelse på arbejdspladsen", "Blokering af vej", 
-            "Kriminalitet i sportsarena", "Forbrydelse under festival", "Razzia i virksomhed", "Brud på brandregler", 
-            "Stjålne identiteter", "Ulovlig reklameplacering", "Organiseret røveri", "Stjålet køretøj i aktivitet", 
-            "Skovtyveri", "Sømand på flugt", "Forbrydelse i supermarked", "Manipulation af politisk system", 
-            "Misbrug af medier", "Kønsbaseret vold", "Misbrug af magtposition", "Cyberkriminalitet", 
-            "Ødelæggelse af offentlige optegnelser", "Bilnedbrud", "Fladt dæk", "Ulykke med personskader", 
-            "Ulykke uden personskader", "Bilbrænding (på vej)", "Overophedning af motor", "Benzinmangel", 
-            "Starthjælp (batteriudladning)", "Motorstop", "Vejspærring", "Vejrforhold (snestorm, isglatte veje)", 
-            "Køretøj sidder fast i sne", "Kædedyseproblemer (tuning motor)", "Pumpefejl (brændstofpumpe)", 
-            "Kørsel uden førerret", "Mistet bilnøgle", "Køretøj ude af kontrol", "Fejl på bilens bremser", 
-            "Aflæsning af bilens batteristatus", "Bil på sidevej (ikke tilkaldt politi)", "Bil på forkert vej", 
-            "Elbil med lav batteri (kan ikke komme videre)", "Køretøj på landevej (hæmmer trafik)", 
-            "Udskiftning af lyspære", "Reparation af bilens motor", "Ulykkestilfælde med flere køretøjer", 
-            "Håndtering af parkeret køretøj på ulovlig plads", "Køretøj fast i mudder", "Køretøj fast i vand (flod, regn)", 
-            "Køretøj fast i sand", "Vejhjælp med lastbil", "Tjek af dæktryk", "Spærret kørsel (vejarbejde)", 
-            "Vejhjælp på motorvej", "Kørsel uden bilforsikring", "Skader på bilens støddæmper", 
-            "Reparation af bilens elektriske system", "Håndtering af kemikalieudslip", "Vejhjælp til påkørt køretøj", 
-            "Hjulskift ved vejkant", "Reparation af bilens aircondition", "Kørsel med mistænkt motorstøj", 
-            "Fejl på bilens gearkasse", "Reparation af forlygte", "Brændstofpumpefejl", "Køretøj låst (sammenbrudt låsesystem)", 
-            "Håndtering af udslip af væsker fra køretøj", "Vejhjælp til køretøj med mistet kørekort", 
-            "Udfordringer med bilens udstødning", "Defekt bilvinduesvisker", "Problemer med bilens klimaanlæg", 
-            "Vejhjælp med lastbil på sidevej", "Ulykkesbilen på hovedvej", "Skader på bilens undercarriage", 
-            "Nedbrudt køretøj ved jernbaneoverkørsel", "Bilproblemer i tæt tåge", "Køretøj med hæmmet motorfunktion", 
-            "Ulykkesbil med væltning", "Vejhjælp med køretøj på bakketop", "Faldende temperaturer – frostfare", 
-            "Køretøj på sneglat vej", "Vejhjælp til køretøj på grusvej", "Køretøj med for høj hastighed i dårligt vejr", 
-            "Hjulskift på landvej", "Stoppet køretøj i midterrabatten", "Køretøj på bro (problemer ved konstruktion)", 
-            "Kørsel med for tung last", "Skader på køretøjets ledningssystem", "Køretøj fast på bakketop", 
-            "Håndtering af opstået gaslækage i køretøj", "Problemer med bilens affjedring", "Køretøj ude af vejbanen i sving", 
-            "Vejhjælp til køretøj på glat vej", "Mangel på bremsesystem i bil", "Ulykkesbil, som er blevet påkørt bagfra", 
-            "Køretøj med problemer med motorens kølesystem", "Skader på bilens karrosseri", "Fejl i bilens elektriske forbindelser", 
-            "Køretøj med defekte bremseklodser", "Skader på køretøjets hjulophæng", "Stoppet køretøj med motorlugt", 
-            "Køretøj med fejl i gearsystemet", "Vejhjælp til køretøj, der mister olie", "Vejhjælp til køretøj med defekte tændrør", 
-            "Køretøj på væltet bro", "Køretøj fast i mudder og vand", "Bil på udkig efter tankstation", 
-            "Vejhjælp til defekte lygter", "Kørsel med mistet forrude", "Håndtering af ukendt væske på vej", 
-            "Ulykke med knust dæk", "Stoppet køretøj på vej med høj hastighed", "Reparation af bilens klimaanlæg", 
-            "Problemer med bilens vejhjul", "Vejhjælp til lastbil i kold temperatur", "Vejhjælp ved landskabsopgradering", 
-            "Køretøj med knækket aksel", "Reparation af bilens startmotor", "Køretøj på forladt vej", "Hjulskift på lastbil", 
-            "Køretøj fast på motorvej", "Reparation af brændstofpumpen", "Ulykkesbil på motorvej", "Køretøj fast i tæt trafik", 
-            "Hjulproblemer på vej mod servicecenter", "Vejhjælp på landevej", "Fejl på bilens styresystem", 
-            "Køretøj skadet under hastig opbremsning", "Køretøj med utæt kobling", "Køretøj kører uden tilstrækkelig olie", 
-            "Problemer med bilens dyse", "Køretøj fast i sandbanke", "Motorbrænding og udfald", "Vejhjælp til uheldig bil i regnvejr", 
-            "Stoppet køretøj i vejsidehøjde", "Reparation af bilens motorventilator", "Fastkørt køretøj med kølesystemfejl", 
-            "Køretøj, der er parkeret ulovligt", "Vejhjælp til køretøj med skader på vejen", "Bil med driftsforstyrrelser", 
-            "Sprængt vandledning", "Strømsvigt i boligblok", "Manglende varmeforsyning", "Sprunget fjernvarmerør", "Læk i gasledning", 
-            "Vandtryk for lavt", "Alarm fra kloakpumpestation", "Defekt gadelygte", "Afbrudt internettjeneste", 
-            "Signalfejl i trafikstyring", "Udstyr til fjernvarme svigter", "Driftsforstyrrelser på renseanlæg", 
-            "Vandprøve ikke godkendt", "Lækage fra spildevandsledning", "Akut problemer med gadelys", 
-            "Hjælp til hjemmepleje borger", "Alarm fra nødkald", "Person faldet i hjemmet", "Mistanke om sygdom hos borger", 
-            "Mistanke om overgreb", "Vold mod personale", "Psykisk ustabil borger forsvundet", "Defekt dør til kommunal bygning", 
-            "Vandindtrængning i kælder", "Skader på skolemur", "Manglende varme i daginstitution", "Elevator ude af drift", 
-            "Skader på tag/tagrender", "Graffiti på skoler", "Vandlækage i idrætshal", "Låst nødudgang", 
-            "Skimmelsvamp i offentlig bygning", "Brandslukningsudstyr mangler", "Hærværk på toiletbygning i park", 
-            "Problemer med offentlige toiletter", "Manglende adgang til sportshal", "Defekt elevator i ældrebolig", 
-            "Skadedyrsangreb i institution", "Skadedyr registreret (rotter/myrer/duer)", "Frostskade på vandrør", 
-            "Overvågning: uautoriseret adgang til teknisk rum", "Nedbrudt automatiske døre", "Overophedning af serverrum", 
-            "Defekt klimaanlæg", "El-tavle fejl", "Støj fra ventilationsanlæg", "Nedbrudt ventilationsanlæg", 
-            "For højt vandstand i kælder", "Ulovlig affaldsdeponering", "Døde dyr i naturen", "Forurening af sø/vandløb", 
-            "Manglende tømning af skraldespande i park", "Nedfaldne grene i anlæg", "Sprøjtegiftspild", "Røg/brand i naturområde", 
-            "Overfyldt container", "Graffiti på offentlige arealer", "Oversvømmelse af rekreativt område", 
-            "Giftig algeblomst i sø", "Kemikalieudslip fra virksomhed", "Olietønde i å", "Invasiv art observeret", 
-            "Skovsvampe på offentligt område", "Hul i vejbanen", "Løse fliser på fortov", "Nedfalden vejskilt", 
-            "Vejbump beskadiget", "Skiltning mangler", "Vejskader efter frost", "Oversvømmelse af vej", 
-            "Defekt gadelys", "Trafiklys ude af drift", "Manglende saltning/rydning", "Træ eller gren spærrer vej", 
-            "Manglende snerydning", "Olie-/kemikalieudslip på vej", "Vejarbejde ikke afmærket", "Hærværk på busstoppested", 
-            "Glas på cykelsti", "Cykelstativer væltet", "Manglende affaldsopsamling ved vej", "Skade på rabat", 
-            "Fejlmeldt gadebelysning", "Tåge på hovedvej", "Trafikprop pga. vejarbejde", "Defekt vejspærre", 
-            "Stort strømudfald i bydel", "Kommunal traktor punkteret", "Voldsom gæst ved indgang", "Udsmidning nødvendig", 
-            "Vold mod dørmand", "Trussel mod personale", "Gæst med våben", "Beruset gæst", "Slagsmål i køen", 
-            "Uønsket gæst forsøger adgang", "Mistanke om falsk ID", "Gæst med stoffer", "Nægtelse af at forlade stedet", 
-            "Trussel mod andre gæster", "Gruppe optræder truende", "Tyveri i garderobe/bar/kasse", "Uro i VIP-område", 
-            "Seksuel chikane", "Overfald udenfor klub", "Ambulance tilkaldt til gæst", "Mistanke om tricktyveri", 
-            "Overtrædelse af påbud", "Uro mellem gæster og personale", "Mistanke om menneskehandel", "Mistanke om menneskehandel", 
-            "Nødsituation ved nødudgang", "Klager over diskrimination", "Klager over sikkerhed", "Vagtalarmer generelt", 
-            "Indbrudsalarm", "Panikalarm", "Overfaldsalarm", "Udløst brandalarm", "Mistænkelig person observeret", 
-            "Dør/port står åben", "Glasbrudsalarm", "Fejl på alarmsystem", "Skalsikring brudt", "Tyveri fra butik", 
-            "Person tilbageholdes", "Mistænkelig bil på parkeringsplads", "Kamera offline", "Vagtrundering forsinket", 
-            "Vagt har brug for backup", "Alarm for pengeskab", "Overfald på ansat", "Hærværk på toilet", "Strømsvigt i overvågning"
-        ];
+            // Konstanter for animation
+            REFRESH_INTERVAL_MS: 300,
+            STANDARD_TRAVEL_TIME_SECONDS: 1700,
 
-        let missionLog = [];
-        let alarmLyd = new Audio('https://actions.google.com/sounds/v1/alarms/alarm_clock.ogg');
-        let alarmTimer = null;
+            init: function() {
+                this.map = initMap(); 
+                
+                if (localStorage.getItem("tema") === "dark") {
+                    document.body.classList.add("dark");
+                }
 
-        // --- Nye konstanter for hastighedskontrol --- 
-        const OPFRISKNINGS_INTERVAL_MS = 300; 
-        const STANDARD_REJSETID_SEKUNDER = 1700; 
+                this.updateAlarmInterval();
 
-        function opdaterAlarmInterval() {
-            const ms = parseInt(document.getElementById("intervalVælger").value);
-            if (alarmTimer) clearInterval(alarmTimer);
-            alarmTimer = setInterval(opretAlarm, ms);
-        }
+                this.map.on('click', (e) => {
+                    if (!this.stationModeActive) return;
+                    addStationToMap(e.latlng); 
+                    this.stationModeActive = false;
+                });
+            },
 
-        let stationerSynlige = true;
-        function toggleStationer() {
-            stationerSynlige = !stationerSynlige;
-            stationer.forEach(st => {
-                if (stationerSynlige) map.addLayer(st.marker);
-                else map.removeLayer(st.marker);
-            });
-        }
+            // --- OPDATERET LOGIK FOR TOGGLE ---
+            activateStationMode: function() {
+                if (this.stationModeActive) { 
+                    this.stationModeActive = false; 
+                    alert("Tilføj station annulleret."); 
+                } else {
+                    this.stationModeActive = true; 
+                    this.hideAllPanels(); 
+                    alert("Klik på kortet for at placere en station.");
+                }
+            },
 
-        function toggleTema() {
-            document.body.classList.toggle("dark");
-            localStorage.setItem("tema", document.body.classList.contains("dark") ? "dark" : "light");
-        }
+            showVehicleSelectionPanel: function() {
+                const panel = document.getElementById("køretøjsPanel");
+                if (panel.style.display === 'block') { 
+                    panel.style.display = 'none'; 
+                } else {
+                    this.hideAllPanels(); 
+                    displayVehicleSelectionPanel(this.stations); 
+                }
+            },
 
-        window.onload = function() {
-            if (localStorage.getItem("tema") === "dark") {
-                document.body.classList.add("dark");
+            showStatusPanel: function() {
+                const panel = document.getElementById("statusPanel");
+                if (panel.style.display === 'block') { 
+                    panel.style.display = 'none'; 
+                } else {
+                    this.hideAllPanels(); 
+                    displayStatusPanel(this.stations); 
+                }
+            },
+            // --- SLUT PÅ OPDATERET LOGIK ---
+
+            toggleStationsVisibility: function() {
+                toggleStationMarkers(this.stations); 
+            },
+
+            toggleTheme: function() {
+                document.body.classList.toggle("dark");
+                localStorage.setItem("tema", document.body.classList.contains("dark") ? "dark" : "light");
+            },
+
+            updateAlarmInterval: function() {
+                const ms = parseInt(document.getElementById("intervalVælger").value);
+                if (this.alarmTimer) clearInterval(this.alarmTimer);
+                this.alarmTimer = setInterval(() => {
+                    createAlarm(this.stations, this.alarms, this.alarmSound); 
+                }, ms);
+            },
+            
+            sendSelectedVehiclesToAlarm: function(alarmIndex) {
+                const alarm = this.alarms[alarmIndex];
+                if (!alarm) return;
+                
+                sendVehiclesToAlarm(
+                    alarm, 
+                    this.selectedVehicles, 
+                    this.map, 
+                    this.REFRESH_INTERVAL_MS, 
+                    this.STANDARD_TRAVEL_TIME_SECONDS, 
+                    this.stations, 
+                    this.alarms, 
+                    this.missionLog
+                );
+                this.selectedVehicles = []; 
+                document.getElementById("køretøjsPanel").style.display = 'none';
+            },
+
+            // --- DENNE METODE ER FLYTTET HERIND FRA stationer.js ---
+            chooseAlarmAndDispatch: function() {
+                const panel = document.getElementById("køretøjsPanel");
+                panel.innerHTML = "<b>Vælg alarm til at sende køretøjerne til:</b><br>";
+                if (this.alarms.length === 0) { 
+                    panel.innerHTML += "Ingen aktive alarmer.";
+                    return;
+                }
+                this.alarms.forEach((alarm, idx) => { 
+                    panel.innerHTML += `<button onclick='sendKøretøjerTilAlarm(${idx})'>#${alarm.id} - ${alarm.type}</button><br>`;
+                });
+            },
+            // --- SLUT PÅ NY METODE ---
+
+            // Hjælpefunktion til at skjule paneler
+            hideAllPanels: function() {
+                document.getElementById("stationPanel").style.display = 'none';
+                document.getElementById("køretøjsPanel").style.display = 'none';
+                document.getElementById("statusPanel").style.display = 'none';
+                document.getElementById("logPanel").style.display = 'none'; 
             }
-            opdaterAlarmInterval();
         };
 
-        function aktiverStationsTilstand() {
-            stationsTilstand = true;
-            alert("Klik på kortet for at placere en station.");
-        }
-
-        function distanceKm(lat1, lon1, lat2, lon2) {
-            const R = 6371, dLat = (lat2 - lat1) * Math.PI / 180, dLon = (lon2 - lon1) * Math.PI / 180;
-            const a = Math.sin(dLat/2)**2 + Math.cos(lat1*Math.PI/180)*Math.cos(lat2*Math.PI/180)*Math.sin(dLon/2)**2;
-            return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
-        }
-
-        map.on('click', e => {
-            if (!stationsTilstand) return;
-            const navn = prompt("Navn på station:");
-            if (!navn) return;
-            const marker = L.marker(e.latlng, {
-                icon: L.divIcon({
-                    html: `<div class='station-ikon'>🏢 ${navn}</div>`,
-                    className: ''
-                })
-            }).addTo(map);
-            const station = { navn, position: e.latlng, marker, køretøjer: [] };
-            station.marker.on('click', () => {
-                const kNavn = prompt("Navn på køretøj:");
-                const type = prompt("Type: brand, ambulance, politi");
-                const k = { navn: kNavn, type, status: 'standby', station };
-                const m = L.marker(e.latlng, { icon: lavIkon(k.status, k.navn) }).addTo(map);
-                k.marker = m;
-                station.køretøjer.push(k);
-            });
-            stationer.push(station);
-            stationsTilstand = false;
+        // Kør initialiseringsfunktionen når DOM er indlæst
+        document.addEventListener('DOMContentLoaded', () => {
+            Game.init();
         });
 
-        function lavIkon(status, navn) {
-            let farve = 'lightgreen';
-            if (status === 'undervejs') farve = 'rgb(93, 226, 231)';
-            else if (status === 'ved alarm') farve = 'red';
-            else if (status === 'på vej hjem') farve = 'yellow';
-            return L.divIcon({ html: `
-                <div style='text-align:center;'>
-                    <div style='width:12px;height:12px;background:${farve};border:2px solid #444;margin:auto;border-radius:4px;'></div>
-                    <div style='font-size:10px;background:white;color:black;padding:2px 6px;border-radius:4px;margin-top:2px;width:60px;'>${navn}</div>
-                </div>` });
-        }
-
-        function visKøretøjsPanel() {
-            const panel = document.getElementById("køretøjsPanel");
-            if (panel.style.display === 'block') { panel.style.display = 'none'; return; }
-            panel.innerHTML = "<b>Vælg køretøjer:</b><br>";
-            panel.style.display = 'block';
-            valgteKøretøjer = [];
-            stationer.forEach((st, sidx) => {
-                panel.innerHTML += `<hr><b>${st.navn}</b><br>`;
-                st.køretøjer.forEach((k, kidx) => {
-                    panel.innerHTML += `<label><input type='checkbox' onchange='toggleKøretøj(${sidx},${kidx})'> ${k.navn} (${k.type})</label><br>`;
-                });
-            });
-            panel.innerHTML += `<br><button onclick='vælgAlarmOgAfsend()'>Afsend valgte</button>`;
-        }
-
-        function toggleKøretøj(s, k) {
-            const køretøj = stationer[s].køretøjer[k];
-            const index = valgteKøretøjer.indexOf(køretøj);
-            if (index > -1) valgteKøretøjer.splice(index, 1);
-            else valgteKøretøjer.push(køretøj);
-        }
-
-        function vælgAlarmOgAfsend() {
-            const panel = document.getElementById("køretøjsPanel");
-            panel.innerHTML = "<b>Vælg alarm til at sende køretøjerne til:</b><br>";
-            if (alarmer.length === 0) {
-                panel.innerHTML += "Ingen aktive alarmer.";
-                return;
-            }
-            alarmer.forEach((alarm, idx) => {
-                panel.innerHTML += `<button onclick='sendKøretøjerTilAlarm(${idx})'>#${alarm.id} - ${alarm.type}</button><br>`;
-            });
-        }
-
-        function visStatusPanel() {
-            const panel = document.getElementById("statusPanel");
-            if (panel.style.display === 'block') { panel.style.display = 'none'; return; }
-            panel.innerHTML = '<b>Status for alle køretøjer:</b><br>';
-            panel.style.display = 'block';
-            stationer.forEach(st => {
-                st.køretøjer.forEach(k => {
-                    panel.innerHTML += `${k.navn} (${k.type}) - ${k.status}<br>`;
-                });
-            });
-        }
-
-        function opdaterKøretøjsIkon(k) {
-            if (k.marker) {
-                k.marker.setIcon(lavIkon(k.status, k.navn));
-            }
-        }
-
+        // Lav nogle globale funktioner, som HTML kan kalde direkte
         function sendKøretøjerTilAlarm(alarmIndex) {
-            const alarm = alarmer[alarmIndex];
-            const startTid = Date.now();
-            alarm.aktiveKøretøjer = valgteKøretøjer.length;
-
-            valgteKøretøjer.forEach(k => {
-                if (!k.marker) return;
-                k.status = "undervejs";
-                opdaterKøretøjsIkon(k);
-
-                const routeControl = L.Routing.control({
-                    waypoints: [k.marker.getLatLng(), L.latLng(alarm.position.lat, alarm.position.lng)],
-                    routeWhileDragging: false,
-                    addWaypoints: false,
-                    draggableWaypoints: false,
-                    createMarker: () => null
-                });
-
-                routeControl.on('routesfound', function (e) {
-                    const coords = e.routes[0].coordinates;
-                    const antalOpdateringer = (STANDARD_REJSETID_SEKUNDER * 1000) / OPFRISKNINGS_INTERVAL_MS;
-                    const stepSize = Math.max(1, Math.floor(coords.length / antalOpdateringer));
-                    let i = 0;
-
-                    const interval = setInterval(() => {
-                        if (i >= coords.length) {
-                            clearInterval(interval);
-                            k.status = "ved alarm";
-                            opdaterKøretøjsIkon(k);
-
-                            setTimeout(() => { 
-                                k.status = "på vej hjem";  // Køretøjet ændrer status til "gul"
-                                opdaterKøretøjsIkon(k);
-
-                                // Når køretøjet er på vej hjem, fjern alarmen
-                                afslutAlarm(alarm, [k], startTid);  // Fjern alarmen med det samme
-
-                                const hjemControl = L.Routing.control({
-                                    waypoints: [alarm.position, k.station.position],
-                                    routeWhileDragging: false,
-                                    addWaypoints: false,
-                                    draggableWaypoints: false,
-                                    createMarker: () => null
-                                });
-
-                                hjemControl.on('routesfound', function (e2) {
-                                    const hjemCoords = e2.routes[0].coordinates;
-                                    const hjemAntalOpdateringer = (STANDARD_REJSETID_SEKUNDER * 1000) / OPFRISKNINGS_INTERVAL_MS;
-                                    const hjemStep = Math.max(1, Math.floor(hjemCoords.length / hjemAntalOpdateringer));
-                                    let j = 0;
-                                    const hjemInterval = setInterval(() => {
-                                        if (j >= hjemCoords.length) {
-                                            clearInterval(hjemInterval);
-                                            k.status = "standby";  // Køretøjet er tilbage ved stationen
-                                            opdaterKøretøjsIkon(k);
-                                            return;
-                                        }
-                                        k.marker.setLatLng(hjemCoords[j]);
-                                        j += hjemStep;
-                                    }, OPFRISKNINGS_INTERVAL_MS); 
-                                });
-
-                                hjemControl.route();
-                            }, Math.floor(Math.random() * (300000 - 5000 + 1)) + 5000);  // Tid mellem 5 sekunder og 5 minutter
-                            return;
-                        }
-                        k.marker.setLatLng(coords[i]);
-                        i += stepSize;
-                    }, OPFRISKNINGS_INTERVAL_MS); 
-                });
-
-                routeControl.route();
-            });
-
-            valgteKøretøjer = [];
-            document.getElementById("køretøjsPanel").style.display = 'none';
+            Game.sendSelectedVehiclesToAlarm(alarmIndex);
         }
 
-        function opretAlarm() {
-            if (stationer.length === 0) return;
-
-            // Vælg en tilfældig station
-            const tilfældigStationIndex = Math.floor(Math.random() * stationer.length);
-            const station = stationer[tilfældigStationIndex];
-
-            // Generer en alarm i nærheden af stationen
-            let lat, lng, dist;
-            do {
-                // Generer en tilfældig position indenfor 10 km fra stationen
-                lat = station.position.lat + (Math.random() - 0.5) * 0.2;
-                lng = station.position.lng + (Math.random() - 0.5) * 0.2;
-                dist = distanceKm(station.position.lat, station.position.lng, lat, lng);
-            } while (dist > 10);  // Kontrollerer, at alarmen ikke er længere end 10 km væk
-
-            const type = alarmTyper[Math.floor(Math.random() * alarmTyper.length)];  // Vælg en tilfældig alarmtype
-            const id = alarmer.length + 1;  // Giver alarmen et unikt id
-            const ikonHtml = `<div class="blink-lampe"></div><div style='font-size:10px;text-align:center;margin-top:2px;'>${type}</div>`; 
-            
-            // Opret marker for alarmen
-            const marker = L.marker([lat, lng], {
-                icon: L.divIcon({ html: ikonHtml })
-            }).addTo(map).on('click', () => {
-                // Hvis man klikker på alarmen, kan man fjerne den manuelt
-                if (confirm("Fjern alarm manuelt?")) {
-                    map.removeLayer(marker);
-                    alarmer = alarmer.filter(a => a.id !== id);
-                }
-            });
-
-            alarmer.push({ id, type, position: { lat, lng }, marker });  // Tilføj alarmen til listen
-
-            // Afspil alarmlyd
-            alarmLyd.play().catch(() => {});
+        function selectVehicleForDispatch(stationIdx, vehicleIdx) {
+            const vehicle = Game.stations[stationIdx].køretøjer[vehicleIdx];
+            const index = Game.selectedVehicles.indexOf(vehicle);
+            if (index > -1) Game.selectedVehicles.splice(index, 1);
+            else Game.selectedVehicles.push(vehicle);
         }
 
-        function afslutAlarm(alarm, køretøjer, startTid) {
-            map.removeLayer(alarm.marker);
-            alarmer = alarmer.filter(a => a.id !== alarm.id);
-            const slutTid = Date.now();
-            missionLog.push({
-                alarmId: alarm.id,
-                type: alarm.type,
-                tid: new Date().toLocaleTimeString(),
-                køretøjer: køretøjer.map(k => k.navn),
-                responstid: ((slutTid - startTid) / 1000).toFixed(1) + ' sek'
-            });
+        function showStationDetails(station) {
+            const panel = document.getElementById("stationPanel");
+            // Tjek om det er samme station, og om panelet allerede er åbent
+            if (Game.selectedStation === station && panel.style.display === 'block') {
+                panel.style.display = 'none'; // Skjul panelet
+                Game.selectedStation = null; // Ryd den valgte station
+            } else {
+                Game.selectedStation = station; // Sæt den valgte station
+                Game.hideAllPanels(); // Skjul alle andre paneler
+                displayStationPanel(station, Game.stations); // Vis dette panel
+                panel.style.display = 'block'; // Sørg for det bliver synligt
+            }
+        }
+
+        function addVehicleToSelectedStation() {
+            if (Game.selectedStation) {
+                addVehicleToStation(Game.selectedStation, Game.map); 
+                displayStationPanel(Game.selectedStation, Game.stations); 
+            }
+        }
+
+        function deleteVehicleFromStation(stationIdx, vehicleIdx) {
+            const station = Game.stations[stationIdx];
+            deleteVehicle(station, vehicleIdx, Game.map); 
+            displayStationPanel(station, Game.stations); 
+        }
+
+        function editVehicleInStation(stationIdx, vehicleIdx) {
+            alert("Redigeringsfunktion er ikke implementeret endnu.");
+        }
+
+        function deleteSelectedStation() {
+            if (Game.selectedStation) {
+                deleteStation(Game.selectedStation, Game.stations, Game.map); 
+                Game.hideAllPanels(); 
+                Game.selectedStation = null;
+            }
+        }
+
+        function renameSelectedStation() {
+            if (Game.selectedStation) {
+                renameStation(Game.selectedStation); 
+                displayStationPanel(Game.selectedStation, Game.stations); 
+            }
         }
     </script>
 </body>
