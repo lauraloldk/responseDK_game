@@ -24,6 +24,8 @@
             --danger-button-bg: #f44336;
             --danger-button-hover: #d32f2f;
             --danger-button-text: white;
+            --link-color: #007bff; /* Added for clickable links */
+            --link-hover-color: #0056b3; /* Added for clickable links */
         }
         body.dark {
             --bg: #121212;
@@ -36,6 +38,8 @@
             --danger-button-bg: #cc2f2f;
             --danger-button-hover: #a02525;
             --danger-button-text: #f0f0f0;
+            --link-color: #61dafb; /* Dark theme link color */
+            --link-hover-color: #21a1f1; /* Dark theme link hover color */
         }
         #map {
             height: 90vh;
@@ -76,6 +80,7 @@
             background-color: var(--danger-button-hover);
         }
 
+        /* Paneler generelt */
         #køretøjsPanel, #statusPanel, #logPanel, #stationPanel {
             position: absolute;
             top: 70px;
@@ -92,6 +97,7 @@
             color: var(--text);
             min-width: 250px;
         }
+        /* Specifik styling for stationPanel */
         #stationPanel h3 {
             margin-top: 0;
             margin-bottom: 10px;
@@ -117,6 +123,7 @@
             font-size: 12px;
         }
 
+        /* Markør-ikoner */
         .station-ikon {
             font-size: 16px;
             font-weight: 600;
@@ -184,6 +191,18 @@
         #saveLoadPanel button {
             margin: 5px;
         }
+
+        /* NEW: Styles for clickable station links in panels */
+        .station-link {
+            cursor: pointer;
+            color: var(--link-color);
+            text-decoration: underline;
+            font-weight: bold; /* Make it stand out more */
+        }
+        .station-link:hover {
+            color: var(--link-hover-color);
+        }
+
     </style>
 </head>
 <body>
@@ -245,7 +264,7 @@
             alarmSound: new Audio('https://actions.google.com/sounds/v1/alarms/alarm_clock.ogg'),
             alarmTimer: null,
             missionLog: [],
-            gameTime: 0, // Added gameTime to the Game object for saving/loading
+            gameTime: 0, 
 
             // Konstanter for animation
             REFRESH_INTERVAL_MS: 300,
@@ -271,10 +290,16 @@
                 
                 // Add an event listener for the 'beforeunload' event to prompt the user to save
                 window.addEventListener('beforeunload', (event) => {
-                    // Standard browser message (modern browsers often ignore custom messages for security)
                     event.preventDefault(); 
-                    event.returnValue = ''; // Required for some browsers to show the prompt
+                    event.returnValue = ''; 
                 });
+
+                // Initialiser/opdater statuspaneler med det samme
+                this.updateStatusPanels(); 
+                // Opdater statuspaneler hvert sekund
+                setInterval(() => this.updateStatusPanels(), 1000); 
+                // Inkrementer spilletid (hvert sekund = 1 game-sekund)
+                setInterval(() => this.gameTime++, 1000);
             },
 
             activateStationMode: function() {
@@ -304,7 +329,9 @@
                     panel.style.display = 'none'; 
                 } else {
                     this.hideAllPanels(); 
-                    displayStatusPanel(this.stations); 
+                    // Opdater indholdet lige før visning for at sikre friske data
+                    this.updateStatusPanels(); 
+                    panel.style.display = 'block'; 
                 }
             },
 
@@ -321,7 +348,6 @@
                 const ms = parseInt(document.getElementById("intervalVælger").value);
                 if (this.alarmTimer) clearInterval(this.alarmTimer);
                 this.alarmTimer = setInterval(() => {
-                    // Pass the ALARM_SPAWN_RADIUS_KM from Game object
                     createAlarm(this.stations, this.alarms, this.alarmSound, this.ALARM_SPAWN_RADIUS_KM); 
                 }, ms);
             },
@@ -342,6 +368,7 @@
                 );
                 this.selectedVehicles = []; 
                 document.getElementById("køretøjsPanel").style.display = 'none';
+                this.updateStatusPanels(); // Update status after dispatch
             },
 
             chooseAlarmAndDispatch: function() {
@@ -361,7 +388,53 @@
                 document.getElementById("køretøjsPanel").style.display = 'none';
                 document.getElementById("statusPanel").style.display = 'none';
                 document.getElementById("logPanel").style.display = 'none'; 
-                document.getElementById("saveLoadPanel").style.display = 'none'; // Also hide the save/load panel
+                document.getElementById("saveLoadPanel").style.display = 'none'; 
+            },
+
+            // --- NY FUNKTION: Opdaterer alle statuspaneler ---
+            updateStatusPanels: function() {
+                // Opdater alarm liste
+                const alarmList = document.querySelector('#statusPanel ul:nth-of-type(1)'); // Første UL i statusPanel
+                alarmList.innerHTML = '';
+                this.alarms.forEach(alarm => {
+                    const listItem = document.createElement('li');
+                    listItem.innerHTML = `Alarm #${alarm.id}: ${alarm.type}`; // Brug innerHTML hvis du vil formatere mere
+                    alarmList.appendChild(listItem);
+                });
+                document.querySelector('#statusPanel h4:nth-of-type(1) span').textContent = this.alarms.length; // Opdater tæller
+
+                // Opdater køretøjsliste MED KLIKBART STATIONSNAVN
+                const vehicleList = document.querySelector('#statusPanel ul:nth-of-type(2)'); // Anden UL i statusPanel
+                vehicleList.innerHTML = '';
+                let totalVehicles = 0;
+                this.stations.forEach(station => {
+                    station.køretøjer.forEach(vehicle => {
+                        totalVehicles++;
+                        const listItem = document.createElement('li');
+                        // Gør stationens navn klikbart
+                        const stationLink = `<span class="station-link" onclick="showStationDetails(Game.stations.find(s => s.id === '${station.id}'))">${station.navn}</span>`;
+
+                        listItem.innerHTML = `
+                            ${vehicle.navn} (${vehicle.type}) - Status: ${vehicle.status} - Station: ${stationLink}
+                        `;
+                        vehicleList.appendChild(listItem);
+                    });
+                });
+                document.querySelector('#statusPanel h4:nth-of-type(2) span').textContent = totalVehicles; // Opdater tæller
+
+                // Opdater missionslog
+                const missionLogList = document.querySelector('#statusPanel ul:nth-of-type(3)'); // Tredje UL i statusPanel
+                missionLogList.innerHTML = '';
+                this.missionLog.forEach(log => {
+                    const listItem = document.createElement('li');
+                    listItem.textContent = `Alarm ${log.alarmId} (${log.type}) løst af ${log.vehicles.join(', ')} på ${log.responseTime} (${log.time})`;
+                    missionLogList.appendChild(listItem);
+                });
+
+                // Opdater spilletid
+                const minutes = Math.floor(this.gameTime / 60);
+                const seconds = this.gameTime % 60;
+                document.querySelector('#controls div:first-child').textContent = `Tid: ${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
             }
         };
 
@@ -382,30 +455,41 @@
             else Game.selectedVehicles.push(vehicle);
         }
 
+        // --- Opdateret showStationDetails ---
         function showStationDetails(station) {
             const panel = document.getElementById("stationPanel");
+            // If the same station is clicked again and panel is visible, hide it
             if (Game.selectedStation === station && panel.style.display === 'block') {
                 panel.style.display = 'none';
                 Game.selectedStation = null;
             } else {
-                Game.selectedStation = station;
-                Game.hideAllPanels();
-                displayStationPanel(station, Game.stations);
-                panel.style.display = 'block';
+                Game.selectedStation = station; // Set current selected station
+                Game.hideAllPanels(); // Hide all other panels
+                displayStationPanel(station, Game.stations); // Populate and display the station panel
+                panel.style.display = 'block'; // Show the station panel
             }
         }
+        // --- END Opdateret showStationDetails ---
 
+        // --- RETTET: addVehicleToSelectedStation ---
         function addVehicleToSelectedStation() {
             if (Game.selectedStation) {
+                // Kald addVehicleToStation funktionen direkte fra stationer.js
+                // Denne funktion håndterer selv prompts for navn og type.
                 addVehicleToStation(Game.selectedStation, Game.map); 
+                // Opdater visningen af stationens panel for at vise det nye køretøj
                 displayStationPanel(Game.selectedStation, Game.stations); 
+                // Opdater den globale statusoversigt
+                Game.updateStatusPanels(); 
             }
         }
+        // --- SLUT RETTELSE ---
 
         function deleteVehicleFromStation(stationIdx, vehicleIdx) {
             const station = Game.stations[stationIdx];
             deleteVehicle(station, vehicleIdx, Game.map); 
             displayStationPanel(station, Game.stations); 
+            Game.updateStatusPanels(); // Update status after deleting vehicle
         }
 
         function editVehicleInStation(stationIdx, vehicleIdx) {
@@ -417,6 +501,7 @@
                 deleteStation(Game.selectedStation, Game.stations, Game.map); 
                 Game.hideAllPanels(); 
                 Game.selectedStation = null;
+                Game.updateStatusPanels(); // Update status after deleting station
             }
         }
 
@@ -424,6 +509,7 @@
             if (Game.selectedStation) {
                 renameStation(Game.selectedStation); 
                 displayStationPanel(Game.selectedStation, Game.stations); 
+                Game.updateStatusPanels(); // Update status after renaming station
             }
         }
 
@@ -465,9 +551,8 @@
         function loadGameAction() {
             const loadCodeInput = document.getElementById('loadCodeInput').value;
             if (loadCodeInput) {
-                // Pass all necessary dependencies to loadGameFromCode
-                // Ensure these functions are globally accessible or passed correctly from map.js
                 loadGameFromCode(loadCodeInput, Game, Game.map, updateVehicleMarkerIcon, createStationMarker, createVehicleMarker, clearAllMapElements);
+                Game.updateStatusPanels(); // Update UI after loading
             } else {
                 alert("Indsæt venligst en gemt kode.");
             }

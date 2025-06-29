@@ -1,18 +1,18 @@
 // map.js
 
-// Disse globale ikonkonstanter er ikke længere nødvendige, da ikonerne oprettes dynamisk
-// const stationIcon = L.divIcon({ ... });
-// const vehicleIcon = L.divIcon({ ... });
-const alarmIcon = L.divIcon({ // Denne kan forblive global, da den ikke indeholder dynamisk tekst
+// alarmIcon konstanten er nu irrelevant, da createAlarmMarker opretter ikonet dynamisk.
+// Du kan slette den helt, men jeg lader den stå kommenteret ud for at vise det.
+/*
+const alarmIcon = L.divIcon({
     className: 'alarm-ikon',
-    html: '<div class="blink-lampe"></div>', // Blinking red circle
+    html: '<div class="blink-lampe"></div>',
     iconSize: [20, 20],
     iconAnchor: [10, 10],
     popupAnchor: [0, -5]
 });
+*/
 
 // Store references to all markers and routing controls currently on the map.
-// This makes it easy to clear them.
 let allMarkers = [];
 let allRouteControls = []; // Track routing controls if any lines were drawn
 
@@ -25,7 +25,7 @@ function initMap() {
 }
 
 // Opret ikon for stationer
-function createStationMarker(position, name, stationObject) { // Tilføjet stationObject parameter
+function createStationMarker(position, name, stationObject) {
     // Opretter ikonet dynamisk, så navnet kan inkluderes direkte i HTML'en
     const dynamicStationIcon = L.divIcon({
         html: `<div class='station-ikon'>🏢 ${name}</div>`, // Inkluder navnet direkte i ikonet
@@ -46,7 +46,7 @@ function createStationMarker(position, name, stationObject) { // Tilføjet stati
 }
 
 // Opret ikon for køretøjer baseret på status og type
-function createVehicleMarker(position, name, type, vehicleObject) { // Tilføjet vehicleObject parameter
+function createVehicleMarker(position, name, type, vehicleObject) {
     // Bestem ikonfarve baseret på status
     let iconColor = 'blue'; // Standard for standby
     if (vehicleObject.status === 'undervejs') {
@@ -74,7 +74,13 @@ function createVehicleMarker(position, name, type, vehicleObject) { // Tilføjet
     
     // Link the marker back to the vehicle object for easy lookup (good for popups/interactions)
     marker.vehicleObject = vehicleObject;
-    marker.bindPopup(`<b>${name}</b> (${type})<br>Status: ${vehicleObject.status}`);
+
+    // Tilføj en click-event til køretøjsmarkøren for at åbne stationens panel
+    marker.on('click', () => {
+        if (vehicleObject.station) { // Sørg for at køretøjet er tilknyttet en station
+            showStationDetails(vehicleObject.station);
+        }
+    });
     
     allMarkers.push(marker); // Keep track of this marker
     return marker;
@@ -105,10 +111,9 @@ function updateVehicleMarkerIcon(vehicle) {
         popupAnchor: [0, -7]
     });
     vehicle.marker.setIcon(newIcon);
-    vehicle.marker.setPopupContent(`<b>${vehicle.navn}</b> (${vehicle.type})<br>Status: ${vehicle.status}`);
+    // Ingen setPopupContent her, da vi ikke ønsker en popup på køretøjer
 }
 
-// Tilføj denne funktion til din map.js
 function updateStationMarkerIcon(station) {
     if (!station.marker) return;
 
@@ -124,8 +129,22 @@ function updateStationMarkerIcon(station) {
     station.marker.setPopupContent(`<b>${station.navn}</b><br><button onclick="showStationDetails(Game.stations.find(s => s.marker === this.__parent__))">Detaljer</button>`);
 }
 
+// Opret alarmmarkør med ID og type (opdateret for at vise tekst)
 function createAlarmMarker(position, id, type, alarmObject) {
-    const marker = L.marker(position, { icon: alarmIcon }).addTo(Game.map);
+    // Opretter ikonet dynamisk for at inkludere ID og type
+    const dynamicAlarmIcon = L.divIcon({
+        className: 'alarm-ikon', // Bruges til den blinkende effekt
+        html: `
+            <div style='text-align:center;'>
+                <div class="blink-lampe" style="margin:auto;"></div>
+                <div style='font-size:10px;font-weight:bold;color:white;background:rgba(0,0,0,0.7);padding:2px 4px;border-radius:3px;margin-top:2px;white-space: nowrap;'>#${id} (${type})</div>
+            </div>`,
+        iconSize: [80, 40], // Justeret størrelse for at give plads til tekst
+        iconAnchor: [40, 20], // Justeret anker
+        popupAnchor: [0, -10] // Justeret popup anker
+    });
+
+    const marker = L.marker(position, { icon: dynamicAlarmIcon }).addTo(Game.map);
     marker.bindPopup(`<b>Alarm #${id}</b><br>${type}<br><button onclick="Game.showVehicleSelectionPanel()">Send køretøj</button><br><button class="danger-button" onclick="resolveAlarmManually(Game.alarms.find(a => a.id === ${id}))">Afslut alarm</button>`);
     
     // Store alarm object reference in the marker for easy lookup
@@ -137,16 +156,14 @@ function createAlarmMarker(position, id, type, alarmObject) {
 
 // Toggle synlighed af stationsmarkører
 function toggleStationMarkers(stations) {
-    // Bemærk: Du skal vedligeholde en "stationsSynlige" status i Game-objektet
     if (typeof Game !== 'undefined' && Game.map) { 
-        // Initialiser Game.stationsSynlige hvis den ikke findes
         if (typeof Game.stationsSynlige === 'undefined') {
             Game.stationsSynlige = true; // Antag synlig ved start
         }
 
         Game.stationsSynlige = !Game.stationsSynlige; // Toggle status
         stations.forEach(st => {
-            if (st.marker) { // Sørg for at markøren eksisterer
+            if (st.marker) {
                 if (Game.stationsSynlige) {
                     st.marker.addTo(Game.map); // Vis markør
                 } else {
@@ -174,10 +191,4 @@ function clearAllMapElements(mapInstance) {
         }
     });
     allRouteControls = []; // Reset the array
-    
-    // Optionally, if you have other custom layers or polygons, clear them here as well.
 }
-
-// distanceKm er flyttet til alarmer.js, så den skal ikke være her.
-// Hvis den stadig er i din map.js, bør den fjernes for at undgå duplikering.
-// function distanceKm(lat1, lon1, lat2, lon2) { ... }
