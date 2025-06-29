@@ -129,7 +129,7 @@ const alarmTypes = [
     "Vagt har brug for backup", "Alarm for pengeskab", "Overfald på ansat", "Hærværk på toilet", "Strømsvigt i overvågning"
 ];
 
-function createAlarm(stations, alarmsArray, alarmSound) {
+function createAlarm(stations, alarmsArray, alarmSound, spawnRadiusKm) { // Added spawnRadiusKm parameter
     if (stations.length === 0) return;
 
     const randomStationIndex = Math.floor(Math.random() * stations.length);
@@ -137,10 +137,10 @@ function createAlarm(stations, alarmsArray, alarmSound) {
 
     let lat, lng, dist;
     do {
-        lat = station.position.lat + (Math.random() - 0.5) * 0.2;
-        lng = station.position.lng + (Math.random() - 0.5) * 0.2;
+        lat = station.position.lat + (Math.random() - 0.5) * (spawnRadiusKm / 111.32); // Approx degrees per KM
+        lng = station.position.lng + (Math.random() - 0.5) * (spawnRadiusKm / (111.32 * Math.cos(station.position.lat * Math.PI / 180)));
         dist = distanceKm(station.position.lat, station.position.lng, lat, lng);
-    } while (dist > 10); 
+    } while (dist > spawnRadiusKm); // Use the new parameter here
 
     const type = alarmTypes[Math.floor(Math.random() * alarmTypes.length)];
     const id = alarmsArray.length + 1;
@@ -346,4 +346,16 @@ function resolveAlarmManually(alarmToResolve) {
             });
         }
     }
+}
+
+function distanceKm(lat1, lon1, lat2, lon2) {
+    const R = 6371; // Radius of Earth in kilometers
+    const dLat = (lat2 - lat1) * Math.PI / 180;
+    const dLon = (lon2 - lon1) * Math.PI / 180;
+    const a = 
+        Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+        Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLon / 2) * Math.sin(dLon / 2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    const d = R * c; // Distance in km
+    return d;
 }

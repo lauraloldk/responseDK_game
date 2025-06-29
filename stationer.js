@@ -4,8 +4,6 @@ function addStationToMap(latlng) {
     const name = prompt("Navn på station:");
     if (!name) return;
 
-    // Game.stations vil være et globalt array, der indeholder alle stationer
-    // Vi antager, at Game.map er tilgængelig fra map.js
     const station = { 
         id: Game.stations.length + 1, // Giv stationen et unikt ID
         navn: name, 
@@ -13,14 +11,15 @@ function addStationToMap(latlng) {
         marker: null, 
         køretøjer: [] 
     };
-    station.marker = createStationMarker(latlng, name, station); // Opret markør via map.js
+    // Korrekt kald til createStationMarker fra map.js
+    station.marker = createStationMarker(latlng, name, station); 
     Game.stations.push(station); // Tilføj til Game-objektets stationsarray
 }
 
 function addVehicleToStation(station, mapInstance) {
     const kNavn = prompt("Navn på køretøj:");
     if (!kNavn) return;
-    const type = prompt("Type: brand, ambulance, politi, Andet");
+    const type = prompt("Type (f.eks. brand, ambulance, politi, Andet):");
     if (!type) return;
 
     const vehicle = { 
@@ -32,8 +31,8 @@ function addVehicleToStation(station, mapInstance) {
         marker: null,
         routeControl: null // Tilføj dette for at kunne fjerne ruter senere
     };
-    // Marker needs to be created at the station's position
-    vehicle.marker = L.marker(station.position, { icon: createVehicleIcon(vehicle.status, vehicle.navn) }).addTo(mapInstance);
+    // RETTET: Korrekt kald til createVehicleMarker fra map.js
+    vehicle.marker = createVehicleMarker(station.position, vehicle.navn, vehicle.type, vehicle);
     station.køretøjer.push(vehicle);
     // Genopfrisk stationspanelet efter tilføjelse
     displayStationPanel(station, Game.stations); 
@@ -44,9 +43,13 @@ function deleteVehicle(station, vehicleIdx, mapInstance) {
     if (confirm(`Er du sikker på, at du vil slette køretøj ${vehicle.navn}?`)) {
         if (vehicle.marker) {
             mapInstance.removeLayer(vehicle.marker);
+            // Fjern markøren fra allMarkers array'et
+            allMarkers = allMarkers.filter(m => m !== vehicle.marker);
         }
         if (vehicle.routeControl) { // Fjern eventuel aktiv rute
             mapInstance.removeControl(vehicle.routeControl);
+            // Fjern routeControl fra allRouteControls array'et
+            allRouteControls = allRouteControls.filter(rc => rc !== vehicle.routeControl);
         }
         station.køretøjer.splice(vehicleIdx, 1);
         displayStationPanel(station, Game.stations); // Opdater panelet
@@ -57,13 +60,19 @@ function deleteStation(station, stationsArray, mapInstance) {
     if (confirm(`Er du sikker på, at du vil slette station ${station.navn} og alle dens ${station.køretøjer.length} køretøjer?`)) {
         if (station.marker) {
             mapInstance.removeLayer(station.marker);
+            // Fjern stationens markør fra allMarkers
+            allMarkers = allMarkers.filter(m => m !== station.marker);
         }
         station.køretøjer.forEach(v => {
             if (v.marker) {
                 mapInstance.removeLayer(v.marker);
+                // Fjern køretøjets markør fra allMarkers
+                allMarkers = allMarkers.filter(m => m !== v.marker);
             }
             if (v.routeControl) { // Fjern eventuel aktiv rute for køretøjer
                 mapInstance.removeControl(v.routeControl);
+                // Fjern routeControl fra allRouteControls array'et
+                allRouteControls = allRouteControls.filter(rc => rc !== v.routeControl);
             }
         });
         // Fjern stationen fra det globale stationsarray i Game
@@ -80,10 +89,8 @@ function renameStation(station) {
     const newName = prompt(`Omdøb station "${station.navn}" til:`, station.navn);
     if (newName && newName.trim() !== "") {
         station.navn = newName.trim();
-        station.marker.setIcon(L.divIcon({
-            html: `<div class='station-ikon'>🏢 ${station.navn}</div>`,
-            className: ''
-        }));
+        // BRUGER NU: updateStationMarkerIcon fra map.js for konsistent opdatering
+        updateStationMarkerIcon(station); 
         displayStationPanel(station, Game.stations); // Opdater panelet
     }
 }
