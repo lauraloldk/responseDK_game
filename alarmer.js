@@ -145,7 +145,6 @@ function createAlarm(stations, alarmsArray, alarmSound) {
     const type = alarmTypes[Math.floor(Math.random() * alarmTypes.length)];
     const id = alarmsArray.length + 1;
     
-    // Opret alarmmarkør via map.js
     const alarm = { id, type, position: { lat, lng }, marker: null, activeVehicles: 0 };
     alarm.marker = createAlarmMarker({ lat, lng }, id, type, alarm);
     
@@ -159,9 +158,9 @@ function sendVehiclesToAlarm(
     mapInstance, 
     refreshInterval, 
     standardTravelTime, 
-    allStations, // For at kunne rydde alarmreferencer
-    allAlarms, // For at kunne fjerne alarmen fra listen
-    missionLog // For at logge missionen
+    allStations, 
+    allAlarms, 
+    missionLog
 ) {
     const startTime = Date.now();
     
@@ -169,29 +168,40 @@ function sendVehiclesToAlarm(
         if (!vehicle.marker) return;
 
         vehicle.status = "undervejs";
-        vehicle.alarm = alarm; // Tildel alarmen til køretøjet
-        updateVehicleMarkerIcon(vehicle); // Opdater ikon via map.js
+        vehicle.alarm = alarm; 
+        updateVehicleMarkerIcon(vehicle); 
 
-        if (vehicle.routeControl) { // Fjern tidligere rute, hvis den eksisterer
+        // Fjern tidligere rute, hvis den eksisterer
+        if (vehicle.routeControl) { 
             mapInstance.removeControl(vehicle.routeControl);
+            vehicle.routeControl = null; 
         }
 
+        // --- RUTE TIL ALARM ---
         const routeControl = L.Routing.control({
             waypoints: [vehicle.marker.getLatLng(), L.latLng(alarm.position.lat, alarm.position.lng)],
             routeWhileDragging: false,
             addWaypoints: false,
             draggableWaypoints: false,
-            createMarker: () => null,
-            lineOptions: { styles: [{ color: 'blue', opacity: 0.6, weight: 6 }] } // Vis ruten
+            createMarker: () => null, // Undgå standardmarkører
+            lineOptions: { styles: [] }, // Ingen visuelle linjer!
+            show: false // Skjul rutevejledningspanelet
         });
         
-        vehicle.routeControl = routeControl; // Gem ruten på køretøjet
+        vehicle.routeControl = routeControl; 
         routeControl.addTo(mapInstance);
 
         routeControl.on('routesfound', function (e) {
             const coords = e.routes[0].coordinates;
-            const numUpdates = (standardTravelTime * 1000) / refreshInterval;
-            const stepSize = Math.max(1, Math.floor(coords.length / numUpdates));
+            // Beregn antal opdateringer baseret på ønsket rejsetid og refreshInterval
+            // Vi bruger stadig standardTravelTime for at bestemme hastigheden
+            const routeLengthMeters = e.routes[0].summary.totalDistance;
+            const simulatedSpeedMps = routeLengthMeters / standardTravelTime; // Meters per second
+            const totalAnimationDurationMs = (routeLengthMeters / simulatedSpeedMps) * 1000;
+
+            const numSteps = Math.ceil(totalAnimationDurationMs / refreshInterval);
+            const stepIndexIncrement = Math.max(1, Math.floor(coords.length / numSteps));
+            
             let i = 0;
 
             const interval = setInterval(() => {
@@ -200,52 +210,55 @@ function sendVehiclesToAlarm(
                     vehicle.status = "ved alarm";
                     updateVehicleMarkerIcon(vehicle);
 
-                    // Fjern ruten når køretøjet er fremme
                     if (vehicle.routeControl) {
                         mapInstance.removeControl(vehicle.routeControl);
                         vehicle.routeControl = null;
                     }
 
-                    // Tjek om dette er det første køretøj, der ankommer, eller det sidste
-                    // Hvis du vil fjerne alarmen med det samme, kan du gøre det her.
-                    // For nu fjerner vi den, når et køretøj er sendt afsted.
                     resolveAlarm(alarm, [vehicle], startTime, allAlarms, allStations, mapInstance, missionLog);
-                    vehicle.alarm = null; // Ryd alarm fra køretøjet, da alarmen er 'løst'
+                    vehicle.alarm = null; 
 
                     // Simulerer tid ved alarm, før den kører hjem
                     setTimeout(() => { 
                         vehicle.status = "på vej hjem"; 
                         updateVehicleMarkerIcon(vehicle);
 
+                        // --- RUTE HJEM ---
                         const homeControl = L.Routing.control({
                             waypoints: [alarm.position, vehicle.station.position],
                             routeWhileDragging: false,
                             addWaypoints: false,
                             draggableWaypoints: false,
-                            createMarker: () => null,
-                            lineOptions: { styles: [{ color: 'green', opacity: 0.6, weight: 6 }] } // Vis hjemruten
+                            createMarker: () => null, // Undgå standardmarkører
+                            lineOptions: { styles: [] }, // Ingen visuelle linjer!
+                            show: false // Skjul rutevejledningspanelet
                         });
-                        vehicle.routeControl = homeControl; // Gem hjemruten
+                        vehicle.routeControl = homeControl; 
                         homeControl.addTo(mapInstance);
 
                         homeControl.on('routesfound', function (e2) {
                             const homeCoords = e2.routes[0].coordinates;
-                            const homeNumUpdates = (standardTravelTime * 1000) / refreshInterval;
-                            const homeStep = Math.max(1, Math.floor(homeCoords.length / homeNumUpdates));
+                            const homeRouteLengthMeters = e2.routes[0].summary.totalDistance;
+                            const homeSimulatedSpeedMps = homeRouteLengthMeters / standardTravelTime;
+                            const homeTotalAnimationDurationMs = (homeRouteLengthMeters / homeSimulatedSpeedMps) * 1000;
+                            
+                            const homeNumSteps = Math.ceil(homeTotalAnimationDurationMs / refreshInterval);
+                            const homeStepIndexIncrement = Math.max(1, Math.floor(homeCoords.length / homeNumSteps));
+                            
                             let j = 0;
                             const homeInterval = setInterval(() => {
                                 if (j >= homeCoords.length) {
                                     clearInterval(homeInterval);
                                     vehicle.status = "standby"; 
                                     updateVehicleMarkerIcon(vehicle);
-                                    if (vehicle.routeControl) { // Fjern hjemruten
+                                    if (vehicle.routeControl) { 
                                         mapInstance.removeControl(vehicle.routeControl);
                                         vehicle.routeControl = null;
                                     }
                                     return;
                                 }
                                 vehicle.marker.setLatLng(homeCoords[j]);
-                                j += homeStep;
+                                j += homeStepIndexIncrement;
                             }, refreshInterval); 
                         });
                         homeControl.route();
@@ -253,13 +266,14 @@ function sendVehiclesToAlarm(
                     return;
                 }
                 vehicle.marker.setLatLng(coords[i]);
-                i += stepSize;
+                i += stepIndexIncrement;
             }, refreshInterval); 
         });
 
         routeControl.route(); // Start ruten
     });
 }
+
 
 function resolveAlarm(alarm, vehicles, startTime, allAlarms, allStations, mapInstance, missionLog) {
     // Fjern alarmmarkøren fra kortet
@@ -282,10 +296,14 @@ function resolveAlarm(alarm, vehicles, startTime, allAlarms, allStations, mapIns
         responseTime: ((endTime - startTime) / 1000).toFixed(1) + ' sek'
     });
 
-    // Sikre at alle køretøjer, der var tildelt denne alarm, får deres alarmreference nulstillet
     allStations.forEach(st => {
         st.køretøjer.forEach(k => {
             if (k.alarm && k.alarm.id === alarm.id) {
+                // Skulle allerede være fjernet i animate-logikken, men en ekstra sikkerhed
+                if (k.routeControl) { 
+                    mapInstance.removeControl(k.routeControl);
+                    k.routeControl = null;
+                }
                 k.alarm = null;
             }
         });
@@ -295,39 +313,34 @@ function resolveAlarm(alarm, vehicles, startTime, allAlarms, allStations, mapIns
 
 function resolveAlarmManually(alarmToResolve) {
     if (confirm(`Fjern alarm #${alarmToResolve.id}: ${alarmToResolve.type} manuelt?`)) {
-        // Find alarmen i Game.alarms arrayet
         const alarmIndex = Game.alarms.findIndex(a => a.id === alarmToResolve.id);
         if (alarmIndex > -1) {
             const alarm = Game.alarms[alarmIndex];
             
-            // Fjern markøren fra kortet
             if (alarm.marker) {
                 Game.map.removeLayer(alarm.marker);
             }
             
-            // Log alarmen som løst
             Game.missionLog.push({
                 alarmId: alarm.id,
                 type: alarm.type,
                 time: new Date().toLocaleTimeString(),
-                vehicles: [], // Ingen køretøjer sendt
+                vehicles: [], 
                 responseTime: "Manuelt afsluttet"
             });
 
-            // Fjern alarmen fra Game.alarms arrayet
             Game.alarms.splice(alarmIndex, 1);
 
-            // Nulstil alarmreferencer og status for køretøjer, der måtte være på vej til/ved denne alarm
             Game.stations.forEach(st => {
                 st.køretøjer.forEach(k => {
                     if (k.alarm && k.alarm.id === alarmToResolve.id) {
                         if (k.routeControl) {
-                            Game.map.removeControl(k.routeControl); // Fjern ruten fra kortet
+                            Game.map.removeControl(k.routeControl); 
                             k.routeControl = null;
                         }
                         k.alarm = null;
-                        k.status = 'standby'; // Sæt til standby med det samme
-                        updateVehicleMarkerIcon(k); // Opdater ikon
+                        k.status = 'standby'; 
+                        updateVehicleMarkerIcon(k); 
                     }
                 });
             });
