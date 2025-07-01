@@ -2,7 +2,7 @@
 <html lang="da">
 <head>
     <meta charset="UTF-8">
-    <title>Vagtcentral Spil</title>
+    <title>ResponseDK</title>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <link rel="stylesheet" href="https://unpkg.com/leaflet-routing-machine@3.2.12/dist/leaflet-routing-machine.css" />
     <style>
@@ -245,7 +245,9 @@
             <option value="600000">10 minutter</option>
             <option value="5000">5 sekunder</option>
         </select>
-        <span id="gameTimeDisplay">Tid: 00:00</span>
+        <button onclick="Game.pauseAlarms()">⏸️ Pause</button>
+        <button onclick="Game.randomAlarmInterval()">🎲 Tilfældig Interval</button>
+        <span id="gameTimeDisplay">Tid: 00:00</span><span id="realClockDisplay" style="margin-left: 20px;">Klokken: --:--:--</span>
     </div>
     <div id="map"></div>
     <div id="køretøjsPanel"></div>
@@ -304,6 +306,7 @@
             alarmTimer: null,
             missionLog: [],
             gameTime: 0, 
+            randomAlarmMode: false, // New property for tracking random alarm mode 
 
             // Konstanter for animation
             REFRESH_INTERVAL_MS: 300,
@@ -388,9 +391,41 @@
             updateAlarmInterval: function() {
                 const ms = parseInt(document.getElementById("intervalVælger").value);
                 if (this.alarmTimer) clearInterval(this.alarmTimer);
+                this.randomAlarmMode = false; // Reset random mode when manually setting interval
                 this.alarmTimer = setInterval(() => {
                     createAlarm(this.stations, this.alarms, this.alarmSound, this.ALARM_SPAWN_RADIUS_KM); 
                 }, ms);
+            },
+
+            pauseAlarms: function() {
+                if (this.alarmTimer) clearInterval(this.alarmTimer);
+                this.randomAlarmMode = false;
+                // Set interval to 24 hours (24 * 60 * 60 * 1000 = 86400000 ms)
+                this.alarmTimer = setInterval(() => {
+                    createAlarm(this.stations, this.alarms, this.alarmSound, this.ALARM_SPAWN_RADIUS_KM); 
+                }, 86400000);
+                alert("Alarmer sat på pause - næste alarm om 24 timer");
+            },
+
+            randomAlarmInterval: function() {
+                if (this.alarmTimer) clearInterval(this.alarmTimer);
+                this.randomAlarmMode = true;
+                this.scheduleRandomAlarm();
+                alert("Tilfældig alarm-interval aktiveret (10 sekunder - 5 minutter)");
+            },
+
+            scheduleRandomAlarm: function() {
+                if (!this.randomAlarmMode) return;
+                
+                // Random interval between 10 seconds (10000ms) and 5 minutes (300000ms)
+                const minInterval = 10000;  // 10 seconds
+                const maxInterval = 300000; // 5 minutes
+                const randomInterval = Math.floor(Math.random() * (maxInterval - minInterval + 1)) + minInterval;
+                
+                this.alarmTimer = setTimeout(() => {
+                    createAlarm(this.stations, this.alarms, this.alarmSound, this.ALARM_SPAWN_RADIUS_KM);
+                    this.scheduleRandomAlarm(); // Schedule next random alarm
+                }, randomInterval);
             },
             
             sendSelectedVehiclesToAlarm: function(alarmIndex) {
@@ -494,6 +529,15 @@
         document.addEventListener('DOMContentLoaded', () => {
             Game.init();
         });
+
+        // Vis aktuelt klokkeslæt (realtid)
+        setInterval(() => {
+            const now = new Date();
+            const timeString = now.toLocaleTimeString('da-DK'); // Format: HH:MM:SS
+            const clockDisplay = document.getElementById('realClockDisplay');
+            if (clockDisplay) clockDisplay.textContent = `Klokken: ${timeString}`;
+        }, 1000);
+
 
         // Lav nogle globale funktioner, som HTML kan kalde direkte
         function sendKøretøjerTilAlarm(alarmIndex) {
