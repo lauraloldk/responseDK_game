@@ -79,6 +79,8 @@ function addVehicleToStation(station, mapInstance) {
         marker: null, // Leaflet markør objekt
         targetPosition: null, // Destination for rute
         routeControl: null, // Routing Machine kontrol
+        animationInterval: null, // Reference til alarm-rute animation interval
+        homeAnimationInterval: null, // Reference til hjem-rute animation interval
         travelTime: 0, // Tid i bevægelse
         distanceTraveled: 0 // Tilbagelagt distance
     };
@@ -107,6 +109,13 @@ function deleteVehicle(station, vehicleIndex, mapInstance) {
         if (vehicleToRemove.routeControl) {
             mapInstance.removeControl(vehicleToRemove.routeControl);
         }
+        // Stop animation intervals
+        if (vehicleToRemove.animationInterval) {
+            clearInterval(vehicleToRemove.animationInterval);
+        }
+        if (vehicleToRemove.homeAnimationInterval) {
+            clearInterval(vehicleToRemove.homeAnimationInterval);
+        }
 
         station.køretøjer.splice(vehicleIndex, 1); // Fjern køretøjet fra stationens array
         alert("Køretøj slettet.");
@@ -123,6 +132,13 @@ function deleteStation(stationToDelete, allStations, mapInstance) {
             }
             if (vehicle.routeControl) {
                 mapInstance.removeControl(vehicle.routeControl);
+            }
+            // Stop animation intervals
+            if (vehicle.animationInterval) {
+                clearInterval(vehicle.animationInterval);
+            }
+            if (vehicle.homeAnimationInterval) {
+                clearInterval(vehicle.homeAnimationInterval);
             }
         });
 
