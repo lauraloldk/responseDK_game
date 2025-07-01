@@ -79,6 +79,8 @@ function addVehicleToStation(station, mapInstance) {
         marker: null, // Leaflet markør objekt
         targetPosition: null, // Destination for rute
         routeControl: null, // Routing Machine kontrol
+        animationInterval: null, // Reference til alarm-rute animation interval
+        homeAnimationInterval: null, // Reference til hjem-rute animation interval
         travelTime: 0, // Tid i bevægelse
         distanceTraveled: 0 // Tilbagelagt distance
     };
@@ -107,6 +109,13 @@ function deleteVehicle(station, vehicleIndex, mapInstance) {
         if (vehicleToRemove.routeControl) {
             mapInstance.removeControl(vehicleToRemove.routeControl);
         }
+        // Stop animation intervals
+        if (vehicleToRemove.animationInterval) {
+            clearInterval(vehicleToRemove.animationInterval);
+        }
+        if (vehicleToRemove.homeAnimationInterval) {
+            clearInterval(vehicleToRemove.homeAnimationInterval);
+        }
 
         station.køretøjer.splice(vehicleIndex, 1); // Fjern køretøjet fra stationens array
         alert("Køretøj slettet.");
@@ -123,6 +132,13 @@ function deleteStation(stationToDelete, allStations, mapInstance) {
             }
             if (vehicle.routeControl) {
                 mapInstance.removeControl(vehicle.routeControl);
+            }
+            // Stop animation intervals
+            if (vehicle.animationInterval) {
+                clearInterval(vehicle.animationInterval);
+            }
+            if (vehicle.homeAnimationInterval) {
+                clearInterval(vehicle.homeAnimationInterval);
             }
         });
 
@@ -163,18 +179,84 @@ function displayVehicleSelectionPanel(stations) {
         <button class="close-btn" onclick="Game.hideAllPanels()">X</button>
         <h3>Vælg køretøjer til udsendelse</h3>
         <p>Vælg et eller flere køretøjer, og klik derefter på "Send valgte".</p>
-        <div class="vehicle-selection-list">
+        <p><small><strong>Note:</strong> Køretøjer der er "på vej hjem" kan omdirigeres til nye alarmer.</small></p>
+        <div style="margin-bottom: 10px;">
+            <input type="text" id="vehicleSearchInput" placeholder="Søg efter køretøjer (navn, type eller status)..." 
+                   style="width: 100%; padding: 8px; border: 1px solid var(--border); border-radius: 4px; background: var(--button-bg); color: var(--text);"
+                   oninput="filterVehicles()">
+        </div>
+        <div class="vehicle-selection-list" id="vehicleSelectionList">
             ${stations.map((station, sIdx) => `
-                <h4>${station.navn}</h4>
-                ${station.køretøjer.map((vehicle, vIdx) => `
-                    <label>
-                        <input type="checkbox" onchange="selectVehicleForDispatch(${sIdx}, ${vIdx})" ${Game.selectedVehicles.includes(vehicle) ? 'checked' : ''}>
-                        ${vehicle.navn} (${vehicle.type}) - ${vehicle.status}
-                    </label><br>
-                `).join('')}
+                <div class="station-group" data-station-name="${station.navn.toLowerCase()}">
+                    <h4>${station.navn}</h4>
+                    ${station.køretøjer.map((vehicle, vIdx) => {
+                        // Allow selection of vehicles that are standby or returning home
+                        const canDispatch = vehicle.status === 'standby' || vehicle.status === 'på vej hjem';
+                        const statusText = vehicle.status === 'på vej hjem' ? `${vehicle.status} (kan omdirigeres)` : vehicle.status;
+                        
+                        if (canDispatch) {
+                            const cssClass = vehicle.status === 'på vej hjem' ? 'vehicle-item vehicle-redirectable' : 'vehicle-item';
+                            return `
+                                <label class="${cssClass}" data-vehicle-name="${vehicle.navn.toLowerCase()}" data-vehicle-type="${vehicle.type.toLowerCase()}" data-vehicle-status="${vehicle.status.toLowerCase()}">
+                                    <input type="checkbox" onchange="selectVehicleForDispatch(${sIdx}, ${vIdx})" ${Game.selectedVehicles.includes(vehicle) ? 'checked' : ''}>
+                                    ${vehicle.navn} (${vehicle.type}) - ${statusText}
+                                </label><br>
+                            `;
+                        } else {
+                            return `
+                                <div class="vehicle-item-disabled" data-vehicle-name="${vehicle.navn.toLowerCase()}" data-vehicle-type="${vehicle.type.toLowerCase()}" data-vehicle-status="${vehicle.status.toLowerCase()}" style="color: #888; font-style: italic;">
+                                    ${vehicle.navn} (${vehicle.type}) - ${vehicle.status} (ikke tilgængelig)
+                                </div><br>
+                            `;
+                        }
+                    }).join('')}
+                </div>
             `).join('')}
         </div>
         <button onclick="Game.chooseAlarmAndDispatch()">Send valgte køretøjer</button>
     `;
     panel.style.display = 'block';
+}
+
+// Filter function for vehicle search
+function filterVehicles() {
+    const searchInput = document.getElementById('vehicleSearchInput');
+    const searchTerm = searchInput.value.toLowerCase().trim();
+    const vehicleList = document.getElementById('vehicleSelectionList');
+    const stationGroups = vehicleList.querySelectorAll('.station-group');
+    
+    stationGroups.forEach(stationGroup => {
+        const stationName = stationGroup.getAttribute('data-station-name');
+        const vehicleItems = stationGroup.querySelectorAll('.vehicle-item, .vehicle-item-disabled');
+        let hasVisibleVehicles = false;
+        
+        // Check if station name matches search term
+        const stationMatches = stationName.includes(searchTerm);
+        
+        vehicleItems.forEach(vehicleItem => {
+            const vehicleName = vehicleItem.getAttribute('data-vehicle-name');
+            const vehicleType = vehicleItem.getAttribute('data-vehicle-type');
+            const vehicleStatus = vehicleItem.getAttribute('data-vehicle-status');
+            
+            // Check if vehicle matches search term (name, type, status, or station)
+            const vehicleMatches = vehicleName.includes(searchTerm) || 
+                                   vehicleType.includes(searchTerm) || 
+                                   vehicleStatus.includes(searchTerm) ||
+                                   stationMatches;
+            
+            if (vehicleMatches || searchTerm === '') {
+                vehicleItem.style.display = '';
+                hasVisibleVehicles = true;
+            } else {
+                vehicleItem.style.display = 'none';
+            }
+        });
+        
+        // Hide station header if no vehicles are visible and search term doesn't match station
+        if (hasVisibleVehicles || searchTerm === '') {
+            stationGroup.style.display = '';
+        } else {
+            stationGroup.style.display = 'none';
+        }
+    });
 }

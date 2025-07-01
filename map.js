@@ -48,7 +48,7 @@ function createStationMarker(position, name, stationObject) {
 // Opret ikon for køretøjer baseret på status og type
 function createVehicleMarker(position, name, type, vehicleObject) {
     // Bestem ikonfarve baseret på status
-    let iconColor = 'rgb(0,255,31)'; // Standard for standby
+    let iconColor = 'rgb(11, 255, 0)'; // Standard for standby - bright green
     if (vehicleObject.status === 'undervejs') {
         iconColor = 'rgb(0,255,249)';
     } else if (vehicleObject.status === 'ved alarm') {
@@ -89,7 +89,7 @@ function createVehicleMarker(position, name, type, vehicleObject) {
 function updateVehicleMarkerIcon(vehicle) {
     if (!vehicle.marker) return;
 
-    let iconColor = 'rgb(0,255,31)'; // Standby
+    let iconColor = 'rgb(11, 255, 0)'; // Standby - bright green
     if (vehicle.status === 'undervejs') {
         iconColor = 'rgb(0,255,249)';
     } else if (vehicle.status === 'ved alarm') {

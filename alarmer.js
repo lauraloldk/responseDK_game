@@ -71,16 +71,29 @@ function sendVehiclesToAlarm(
     vehiclesToSend.forEach(vehicle => {
         if (!vehicle.marker) return;
 
-        vehicle.status = "undervejs";
-        vehicle.alarm = alarm; // Sæt en reference til den alarm, køretøjet kører til
-        vehicle.lastDispatchedAlarmId = alarm.id; // Ny: Gem ID'et for den senest udsendte alarm på køretøjet.
-        updateVehicleMarkerIcon(vehicle); // Antager updateVehicleMarkerIcon er defineret
-
-        // Fjern tidligere rute, hvis den eksisterer (sikkerhedsforanstaltning)
+        // VIGTIGT: Stop alle eksisterende animationer/ruter for dette køretøj
+        // Dette er nødvendigt for redirection fra "på vej hjem" status
         if (vehicle.routeControl) { 
             mapInstance.removeControl(vehicle.routeControl);
             vehicle.routeControl = null; 
         }
+        
+        // Stop enhver aktiv animation interval hvis køretøjet er i bevægelse
+        if (vehicle.animationInterval) {
+            clearInterval(vehicle.animationInterval);
+            vehicle.animationInterval = null;
+        }
+        
+        // Stop enhver aktiv hjem-animation interval
+        if (vehicle.homeAnimationInterval) {
+            clearInterval(vehicle.homeAnimationInterval);
+            vehicle.homeAnimationInterval = null;
+        }
+
+        vehicle.status = "undervejs";
+        vehicle.alarm = alarm; // Sæt en reference til den alarm, køretøjet kører til
+        vehicle.lastDispatchedAlarmId = alarm.id; // Ny: Gem ID'et for den senest udsendte alarm på køretøjet.
+        updateVehicleMarkerIcon(vehicle); // Antager updateVehicleMarkerIcon er defineret
 
         // --- RUTE TIL ALARM ---
         const routeControl = L.Routing.control({
@@ -110,6 +123,7 @@ function sendVehiclesToAlarm(
             const interval = setInterval(() => {
                 if (i >= coords.length) {
                     clearInterval(interval); // Stop animationen
+                    vehicle.animationInterval = null; // Clear reference
                     vehicle.status = "ved alarm";
                     updateVehicleMarkerIcon(vehicle);
 
@@ -156,6 +170,7 @@ function sendVehiclesToAlarm(
                             const homeInterval = setInterval(() => {
                                 if (j >= homeCoords.length) {
                                     clearInterval(homeInterval); // Stop hjem-animationen
+                                    vehicle.homeAnimationInterval = null; // Clear reference
                                     vehicle.status = "standby"; 
                                     updateVehicleMarkerIcon(vehicle);
                                     vehicle.marker.setLatLng(vehicle.station.position); // Sørg for den ender præcis på stationen
@@ -170,6 +185,9 @@ function sendVehiclesToAlarm(
                                 vehicle.marker.setLatLng(homeCoords[j]);
                                 j += homeStepIndexIncrement;
                             }, refreshInterval); 
+                            
+                            // Store home interval reference for potential cleanup
+                            vehicle.homeAnimationInterval = homeInterval; 
                         });
                         homeControl.route(); // Start ruten hjem
                     }, Math.floor(Math.random() * (300000 - 5000 + 1)) + 5000); // Simulerer tid ved alarm: Mellem 5 sek og 5 min
@@ -178,6 +196,9 @@ function sendVehiclesToAlarm(
                 vehicle.marker.setLatLng(coords[i]);
                 i += stepIndexIncrement;
             }, refreshInterval); 
+            
+            // Store interval reference for potential cleanup
+            vehicle.animationInterval = interval; 
         });
 
         routeControl.route(); // Start ruten til alarmen for dette køretøj
