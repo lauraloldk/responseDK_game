@@ -48,13 +48,13 @@ function createStationMarker(position, name, stationObject) {
 // Opret ikon for køretøjer baseret på status og type
 function createVehicleMarker(position, name, type, vehicleObject) {
     // Bestem ikonfarve baseret på status
-    let iconColor = 'blue'; // Standard for standby
+    let iconColor = 'rgb(0,255,31)'; // Standard for standby
     if (vehicleObject.status === 'undervejs') {
-        iconColor = 'orange';
+        iconColor = 'rgb(0,255,249)';
     } else if (vehicleObject.status === 'ved alarm') {
         iconColor = 'red';
     } else if (vehicleObject.status === 'på vej hjem') {
-        iconColor = 'purple';
+        iconColor = 'yellow';
     }
 
     // Opretter ikonet dynamisk, så navnet kan inkluderes direkte i HTML'en
@@ -89,13 +89,13 @@ function createVehicleMarker(position, name, type, vehicleObject) {
 function updateVehicleMarkerIcon(vehicle) {
     if (!vehicle.marker) return;
 
-    let iconColor = 'blue'; // Standby
+    let iconColor = 'rgb(0,255,31)'; // Standby
     if (vehicle.status === 'undervejs') {
-        iconColor = 'orange';
+        iconColor = 'rgb(0,255,249)';
     } else if (vehicle.status === 'ved alarm') {
         iconColor = 'red';
     } else if (vehicle.status === 'på vej hjem') {
-        iconColor = 'purple';
+        iconColor = 'yellow';
     }
 
     // Opretter et nyt L.divIcon for at opdatere markøren
