@@ -329,6 +329,9 @@
             missionLog: [],
             gameTime: 0, 
             randomAlarmMode: false, // New property for tracking random alarm mode 
+            searchedLocation: null, // Store location from address search
+            searchedAddress: null, // Store address name from search
+            addressMarker: null, // Store reference to address marker 
 
             // Konstanter for animation
             REFRESH_INTERVAL_MS: 300,
@@ -376,6 +379,55 @@
                     this.stationModeActive = true; 
                     this.hideAllPanels(); 
                     alert("Klik på kortet for at placere en station.");
+                }
+            },
+
+            addStationAtSearchedLocation: function() {
+                if (this.searchedLocation) {
+                    // Remove the address marker if it exists
+                    if (this.addressMarker) {
+                        this.map.removeLayer(this.addressMarker);
+                        this.addressMarker = null;
+                    }
+                    
+                    // Directly prompt for station name and create station
+                    const stationName = prompt("Indtast navn for den nye brandstation:");
+                    if (!stationName) {
+                        alert("Stationsnavnet må ikke være tomt.");
+                        return;
+                    }
+
+                    const newStation = {
+                        id: `station_${Date.now()}`,
+                        navn: stationName,
+                        position: this.searchedLocation,
+                        køretøjer: [],
+                        marker: null
+                    };
+
+                    // Create marker for the station
+                    newStation.marker = createStationMarker(newStation.position, newStation.navn, newStation);
+                    
+                    this.stations.push(newStation);
+                    this.updateStatusPanels();
+                    alert(`${stationName} er blevet oprettet på ${this.searchedAddress}.`);
+                    
+                    // Reset button and clear stored location
+                    this.resetAddStationButton();
+                }
+            },
+
+            resetAddStationButton: function() {
+                const addStationBtn = document.querySelector('button[onclick="Game.addStationAtSearchedLocation()"], button[onclick="Game.activateStationMode()"]');
+                if (addStationBtn) {
+                    addStationBtn.innerHTML = '➕ Tilføj Station';
+                    addStationBtn.onclick = () => Game.activateStationMode();
+                }
+                this.searchedLocation = null;
+                this.searchedAddress = null;
+                if (this.addressMarker) {
+                    this.map.removeLayer(this.addressMarker);
+                    this.addressMarker = null;
                 }
             },
 
@@ -754,6 +806,10 @@
                 return;
             }
 
+            // Store the searched address location in Game object
+            Game.searchedLocation = { lat, lng };
+            Game.searchedAddress = addressData.display_name;
+
             // Center map on the address
             Game.map.setView([lat, lng], 16);
             
@@ -763,10 +819,15 @@
                 .bindPopup(`📍 ${addressData.display_name}`)
                 .openPopup();
             
-            // Remove the marker after 10 seconds
-            setTimeout(() => {
-                Game.map.removeLayer(addressMarker);
-            }, 10000);
+            // Store reference to remove it later
+            Game.addressMarker = addressMarker;
+            
+            // Change the "Tilføj Station" button to "Tilføj Station Her"
+            const addStationBtn = document.querySelector('button[onclick="Game.activateStationMode()"]');
+            if (addStationBtn) {
+                addStationBtn.innerHTML = '📍 Tilføj Station Her';
+                addStationBtn.onclick = () => Game.addStationAtSearchedLocation();
+            }
             
             // Clear the search field
             document.getElementById('addressSearch').value = '';
