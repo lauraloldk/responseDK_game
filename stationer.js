@@ -57,44 +57,83 @@ function displayStationPanel(station, allStations) {
 
 // Funktion til at tilføje et køretøj til en specifik station
 function addVehicleToStation(station, mapInstance) {
-    const vehicleName = prompt("Indtast køretøjets navn:");
-    if (!vehicleName) {
-        alert("Køretøjets navn må ikke være tomt.");
-        return; // Afbryd, hvis navnet er tomt
+    // Spørg om antal køretøjer
+    const vehicleCountStr = prompt("Hvor mange køretøjer vil du tilføje?", "1");
+    if (!vehicleCountStr) return; // Afbryd hvis annulleret
+    
+    const vehicleCount = parseInt(vehicleCountStr);
+    if (isNaN(vehicleCount) || vehicleCount < 1 || vehicleCount > 20) {
+        alert("Indtast venligst et gyldigt antal mellem 1 og 20.");
+        return;
     }
 
+    // Spørg om køretøjstype (samme for alle)
     const vehicleType = prompt("Indtast køretøjets type (f.eks. Brandbil, Ambulance):");
     if (!vehicleType) {
         alert("Køretøjets type må ikke være tom.");
-        return; // Afbryd, hvis typen er tom
+        return;
     }
 
-    const newVehicle = {
-        id: `vehicle_${Date.now()}`, // Unik ID
-        navn: vehicleName,
-        type: vehicleType,
-        station: station, // Reference til hjemstationen
-        status: 'standby', // Standardstatus
-        position: { lat: station.position.lat, lng: station.position.lng }, // Starter ved stationens position
-        marker: null, // Leaflet markør objekt
-        targetPosition: null, // Destination for rute
-        routeControl: null, // Routing Machine kontrol
-        animationInterval: null, // Reference til alarm-rute animation interval
-        homeAnimationInterval: null, // Reference til hjem-rute animation interval
-        travelTime: 0, // Tid i bevægelse
-        distanceTraveled: 0 // Tilbagelagt distance
-    };
-    station.køretøjer.push(newVehicle);
+    // Generer køretøjer med standardnavne
+    const newVehicles = [];
+    for (let i = 1; i <= vehicleCount; i++) {
+        const defaultName = `${vehicleType} ${i}`;
+        
+        const newVehicle = {
+            id: `vehicle_${Date.now()}_${i}`, // Unik ID
+            navn: defaultName,
+            type: vehicleType,
+            station: station, // Reference til hjemstationen
+            status: 'standby', // Standardstatus
+            position: { lat: station.position.lat, lng: station.position.lng }, // Starter ved stationens position
+            marker: null, // Leaflet markør objekt
+            targetPosition: null, // Destination for rute
+            routeControl: null, // Routing Machine kontrol
+            animationInterval: null, // Reference til alarm-rute animation interval
+            homeAnimationInterval: null, // Reference til hjem-rute animation interval
+            travelTime: 0, // Tid i bevægelse
+            distanceTraveled: 0 // Tilbagelagt distance
+        };
+        
+        // Opret markøren for det nye køretøj på kortet
+        newVehicle.marker = createVehicleMarker(newVehicle.position, newVehicle.navn, newVehicle.type, newVehicle);
+        
+        station.køretøjer.push(newVehicle);
+        newVehicles.push(newVehicle);
+        
+        // Lille forsinkelse for at sikre unikke timestamps
+        if (i < vehicleCount) {
+            // Ingen delay nødvendig da vi tilføjer _${i} til ID'et
+        }
+    }
 
-    // Opret markøren for det nye køretøj på kortet
-    newVehicle.marker = createVehicleMarker(newVehicle.position, newVehicle.navn, newVehicle.type, newVehicle);
-    
-    // Opdater den globale Game.vehicles liste (hvis den eksisterer og bruges)
-    // if (Game.vehicles) Game.vehicles.push(newVehicle); 
+    // Hvis flere end ét køretøj, tilbyd at omdøbe dem individuelt
+    if (vehicleCount > 1) {
+        const rename = confirm(`${vehicleCount} køretøjer af typen "${vehicleType}" er blevet tilføjet med standardnavne.\n\nVil du omdøbe dem individuelt nu?`);
+        if (rename) {
+            renameMultipleVehicles(newVehicles, station);
+        }
+    }
 
-    alert(`${vehicleName} (${vehicleType}) er tilføjet til ${station.navn}.`);
+    alert(`${vehicleCount} køretøj(er) af typen "${vehicleType}" er tilføjet til ${station.navn}.`);
 }
 
+// Ny funktion til at omdøbe flere køretøjer individuelt
+function renameMultipleVehicles(vehicles, station) {
+    for (let i = 0; i < vehicles.length; i++) {
+        const vehicle = vehicles[i];
+        const newName = prompt(`Omdøb køretøj ${i + 1}/${vehicles.length}:`, vehicle.navn);
+        
+        if (newName && newName.trim() !== "") {
+            vehicle.navn = newName.trim();
+            // Opdater markør-ikonet med det nye navn
+            if (vehicle.marker && typeof updateVehicleMarkerIcon === 'function') {
+                updateVehicleMarkerIcon(vehicle);
+            }
+        }
+        // Hvis brugeren annullerer eller efterlader tomt, behold det gamle navn
+    }
+}
 
 // Funktion til at slette et køretøj fra en station
 function deleteVehicle(station, vehicleIndex, mapInstance) {
