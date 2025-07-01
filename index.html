@@ -226,6 +226,20 @@
             color: var(--text);
         }
 
+        /* Styles for vehicle redirection */
+        .vehicle-item-disabled {
+            color: #888;
+            font-style: italic;
+            padding-left: 20px;
+        }
+        
+        .vehicle-redirectable {
+            background-color: rgba(248, 255, 0, 0.1);
+            border-left: 3px solid rgb(248, 255, 0);
+            padding-left: 5px;
+            margin: 2px 0;
+        }
+
     </style>
 </head>
 <body>
@@ -245,9 +259,14 @@
             <option value="600000">10 minutter</option>
             <option value="5000">5 sekunder</option>
         </select>
-        <button onclick="Game.pauseAlarms()">⏸️ Pause</button>
-        <button onclick="Game.randomAlarmInterval()">🎲 Tilfældig Interval</button>
         <span id="gameTimeDisplay">Tid: 00:00</span><span id="realClockDisplay" style="margin-left: 20px;">Klokken: --:--:--</span>
+        <div style="margin-left: 20px; display: inline-flex; align-items: center; gap: 8px;">
+            <label for="addressSearch">🔍 Adresse:</label>
+            <input type="text" id="addressSearch" placeholder="Søg efter adresse..." 
+                   style="padding: 6px; border: 1px solid var(--border); border-radius: 4px; background: var(--button-bg); color: var(--text); width: 200px;"
+                   onkeypress="handleAddressSearch(event)">
+            <button onclick="searchAddress()" style="padding: 6px 10px;">Søg</button>
+        </div>
     </div>
     <div id="map"></div>
     <div id="køretøjsPanel"></div>
@@ -290,7 +309,6 @@
     
     <script src="map.js"></script>
     <script src="stationer.js"></script>
-    <script src="alarmliste.js"></script>
     <script src="alarmer.js"></script>
     <script src="save.js"></script>
 
@@ -307,7 +325,6 @@
             alarmTimer: null,
             missionLog: [],
             gameTime: 0, 
-            randomAlarmMode: false, // New property for tracking random alarm mode 
 
             // Konstanter for animation
             REFRESH_INTERVAL_MS: 300,
@@ -392,41 +409,9 @@
             updateAlarmInterval: function() {
                 const ms = parseInt(document.getElementById("intervalVælger").value);
                 if (this.alarmTimer) clearInterval(this.alarmTimer);
-                this.randomAlarmMode = false; // Reset random mode when manually setting interval
                 this.alarmTimer = setInterval(() => {
                     createAlarm(this.stations, this.alarms, this.alarmSound, this.ALARM_SPAWN_RADIUS_KM); 
                 }, ms);
-            },
-
-            pauseAlarms: function() {
-                if (this.alarmTimer) clearInterval(this.alarmTimer);
-                this.randomAlarmMode = false;
-                // Set interval to 24 hours (24 * 60 * 60 * 1000 = 86400000 ms)
-                this.alarmTimer = setInterval(() => {
-                    createAlarm(this.stations, this.alarms, this.alarmSound, this.ALARM_SPAWN_RADIUS_KM); 
-                }, 86400000);
-                alert("Alarmer sat på pause - næste alarm om 24 timer");
-            },
-
-            randomAlarmInterval: function() {
-                if (this.alarmTimer) clearInterval(this.alarmTimer);
-                this.randomAlarmMode = true;
-                this.scheduleRandomAlarm();
-                alert("Tilfældig alarm-interval aktiveret (10 sekunder - 5 minutter)");
-            },
-
-            scheduleRandomAlarm: function() {
-                if (!this.randomAlarmMode) return;
-                
-                // Random interval between 10 seconds (10000ms) and 5 minutes (300000ms)
-                const minInterval = 10000;  // 10 seconds
-                const maxInterval = 300000; // 5 minutes
-                const randomInterval = Math.floor(Math.random() * (maxInterval - minInterval + 1)) + minInterval;
-                
-                this.alarmTimer = setTimeout(() => {
-                    createAlarm(this.stations, this.alarms, this.alarmSound, this.ALARM_SPAWN_RADIUS_KM);
-                    this.scheduleRandomAlarm(); // Schedule next random alarm
-                }, randomInterval);
             },
             
             sendSelectedVehiclesToAlarm: function(alarmIndex) {
@@ -655,6 +640,89 @@
             }
         }
         // --- END GLOBAL FUNCTIONS FOR SAVE/LOAD PANEL ---
+
+        // --- ADDRESS SEARCH FUNCTIONS ---
+        function handleAddressSearch(event) {
+            if (event.key === 'Enter') {
+                searchAddress();
+            }
+        }
+
+        function searchAddress() {
+            const query = document.getElementById('addressSearch').value.trim();
+            if (!query) {
+                alert('Indtast venligst en adresse at søge efter.');
+                return;
+            }
+
+            // Use Nominatim (OpenStreetMap) geocoding service
+            const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&countrycodes=dk&limit=5`;
+            
+            fetch(url)
+                .then(response => response.json())
+                .then(data => {
+                    if (data && data.length > 0) {
+                        showAddressResults(data, query);
+                    } else {
+                        alert(`Ingen adresser fundet for "${query}".`);
+                    }
+                })
+                .catch(error => {
+                    console.error('Address search error:', error);
+                    alert('Fejl ved adressesøgning. Prøv igen senere.');
+                });
+        }
+
+        function showAddressResults(results, originalQuery) {
+            if (results.length === 1) {
+                // If only one result, go directly to it
+                goToAddress(results[0]);
+            } else {
+                // Show selection dialog for multiple results
+                let message = `Flere adresser fundet for "${originalQuery}":\n\n`;
+                results.forEach((result, index) => {
+                    message += `${index + 1}. ${result.display_name}\n`;
+                });
+                message += '\nVælg nummer (1-' + results.length + '):';
+                
+                const choice = prompt(message);
+                const choiceIndex = parseInt(choice) - 1;
+                
+                if (choiceIndex >= 0 && choiceIndex < results.length) {
+                    goToAddress(results[choiceIndex]);
+                } else if (choice !== null) {
+                    alert('Ugyldigt valg.');
+                }
+            }
+        }
+
+        function goToAddress(addressData) {
+            const lat = parseFloat(addressData.lat);
+            const lng = parseFloat(addressData.lon);
+            
+            if (isNaN(lat) || isNaN(lng)) {
+                alert('Kunne ikke finde gyldig position for denne adresse.');
+                return;
+            }
+
+            // Center map on the address
+            Game.map.setView([lat, lng], 16);
+            
+            // Add a temporary marker to show the location
+            const addressMarker = L.marker([lat, lng])
+                .addTo(Game.map)
+                .bindPopup(`📍 ${addressData.display_name}`)
+                .openPopup();
+            
+            // Remove the marker after 10 seconds
+            setTimeout(() => {
+                Game.map.removeLayer(addressMarker);
+            }, 10000);
+            
+            // Clear the search field
+            document.getElementById('addressSearch').value = '';
+        }
+        // --- END ADDRESS SEARCH FUNCTIONS ---
     </script>
 </body>
 </html>
