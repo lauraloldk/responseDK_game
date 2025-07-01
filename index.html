@@ -258,9 +258,9 @@
             <option value="300000">5 minutter</option>
             <option value="600000">10 minutter</option>
             <option value="5000">5 sekunder</option>
+            <option value="pause">⏸️ Pause (24 timer)</option>
+            <option value="random">🎲 Tilfældig Interval (10s-5min)</option>
         </select>
-        <button onclick="Game.pauseAlarms()">⏸️ Pause</button>
-        <button onclick="Game.randomAlarmInterval()">🎲 Tilfældig Interval</button>
         <span id="gameTimeDisplay">Tid: 00:00</span><span id="realClockDisplay" style="margin-left: 20px;">Klokken: --:--:--</span>
         <div style="margin-left: 20px; display: inline-flex; align-items: center; gap: 8px;">
             <label for="addressSearch">🔍 Adresse:</label>
@@ -411,12 +411,25 @@
             },
 
             updateAlarmInterval: function() {
-                const ms = parseInt(document.getElementById("intervalVælger").value);
+                const selectedValue = document.getElementById("intervalVælger").value;
                 if (this.alarmTimer) clearInterval(this.alarmTimer);
-                this.randomAlarmMode = false; // Reset random mode when manually setting interval
-                this.alarmTimer = setInterval(() => {
-                    createAlarm(this.stations, this.alarms, this.alarmSound, this.ALARM_SPAWN_RADIUS_KM); 
-                }, ms);
+                this.randomAlarmMode = false; // Reset random mode by default
+                
+                if (selectedValue === "pause") {
+                    // Set interval to 24 hours (24 * 60 * 60 * 1000 = 86400000 ms)
+                    this.alarmTimer = setInterval(() => {
+                        createAlarm(this.stations, this.alarms, this.alarmSound, this.ALARM_SPAWN_RADIUS_KM); 
+                    }, 86400000);
+                } else if (selectedValue === "random") {
+                    this.randomAlarmMode = true;
+                    this.scheduleRandomAlarm();
+                } else {
+                    // Normal interval
+                    const ms = parseInt(selectedValue);
+                    this.alarmTimer = setInterval(() => {
+                        createAlarm(this.stations, this.alarms, this.alarmSound, this.ALARM_SPAWN_RADIUS_KM); 
+                    }, ms);
+                }
             },
 
             pauseAlarms: function() {
