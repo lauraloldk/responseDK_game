@@ -21,11 +21,11 @@ function isLikelyWaterLocation(lat, lng) {
     // Hvis uden for hovedland Danmark, højere chance for vand
     if (lat < danmarkMainland.minLat || lat > danmarkMainland.maxLat || 
         lng < danmarkMainland.minLng || lng > danmarkMainland.maxLng) {
-        return Math.random() > 0.4; // 60% chance for vand
+        return true; // Antag vand hvis uden for hovedland
     }
     
-    // Indre Danmark, lavere chance for vand
-    return Math.random() > 0.8; // 20% chance for vand
+    // Indre Danmark, antag land medmindre andet bevises
+    return false;
 }
 
 /**
@@ -38,7 +38,9 @@ async function isLocationOnWater(lat, lng) {
     // Først, tjek cachen
     const cacheKey = `${lat.toFixed(4)},${lng.toFixed(4)}`;
     if (waterLocationCache.has(cacheKey)) {
-        return waterLocationCache.get(cacheKey);
+        const cachedResult = waterLocationCache.get(cacheKey);
+        console.log(`Cache hit for ${lat.toFixed(4)}, ${lng.toFixed(4)}: ${cachedResult ? 'VAND' : 'LAND'}`);
+        return cachedResult;
     }
     
     try {
@@ -51,11 +53,11 @@ async function isLocationOnWater(lat, lng) {
         
         // Først: Tjek error eller manglende data
         if (data.error || !data.display_name) {
-            // Hvis der ikke er data, kan det betyde vand (især i havet)
-            const isWater = Math.random() > 0.5; // 50% chance for vand hvis uklart
-            // Gem resultatet i cache med kortvarig udløb
+            // Hvis der ikke er data, brug geografisk heuristik i stedet for tilfældigt gæt
+            const isWater = isLikelyWaterLocation(lat, lng);
             waterLocationCache.set(cacheKey, isWater);
-            setTimeout(() => waterLocationCache.delete(cacheKey), 1000 * 60 * 5); // Udløb efter 5 minutter
+            setTimeout(() => waterLocationCache.delete(cacheKey), 1000 * 60 * 30); // Cache i 30 minutter
+            console.log(`API returnerede ingen data for ${lat.toFixed(4)}, ${lng.toFixed(4)} - bruger heuristik: ${isWater ? 'VAND' : 'LAND'}`);
             return isWater;
         }
         
@@ -63,11 +65,17 @@ async function isLocationOnWater(lat, lng) {
         if (data.class === 'natural') {
             const waterTypes = ['water', 'bay', 'coastline', 'beach', 'reef', 'strait', 'fjord'];
             if (waterTypes.includes(data.type)) {
+                waterLocationCache.set(cacheKey, true);
+                setTimeout(() => waterLocationCache.delete(cacheKey), 1000 * 60 * 60); // Cache i 1 time
+                console.log(`✓ Bekræftet VAND ved ${lat.toFixed(4)}, ${lng.toFixed(4)} - klasse: ${data.class}, type: ${data.type}`);
                 return true;
             }
         }
         
         if (data.class === 'waterway') {
+            waterLocationCache.set(cacheKey, true);
+            setTimeout(() => waterLocationCache.delete(cacheKey), 1000 * 60 * 60); // Cache i 1 time
+            console.log(`✓ Bekræftet VAND ved ${lat.toFixed(4)}, ${lng.toFixed(4)} - vandvej: ${data.type}`);
             return true; // Floder, kanaler, etc.
         }
         
@@ -81,6 +89,9 @@ async function isLocationOnWater(lat, lng) {
             ];
             
             if (waterKeywords.some(keyword => displayName.includes(keyword))) {
+                waterLocationCache.set(cacheKey, true);
+                setTimeout(() => waterLocationCache.delete(cacheKey), 1000 * 60 * 60); // Cache i 1 time
+                console.log(`✓ Bekræftet VAND ved ${lat.toFixed(4)}, ${lng.toFixed(4)} - navnebeskrivelse indeholder vand-nøgleord`);
                 return true;
             }
         }
@@ -88,35 +99,36 @@ async function isLocationOnWater(lat, lng) {
         // Tjek extraTags for vand-indikatorer
         if (data.extratags) {
             if (data.extratags.water || data.extratags.waterway || data.extratags.natural === 'water') {
+                waterLocationCache.set(cacheKey, true);
+                setTimeout(() => waterLocationCache.delete(cacheKey), 1000 * 60 * 60); // Cache i 1 time
+                console.log(`✓ Bekræftet VAND ved ${lat.toFixed(4)}, ${lng.toFixed(4)} - extratags indeholder vand`);
                 return true;
             }
         }
         
-        // Hvis der ikke er adresse-komponenter, kan det indikere vand
+        // Hvis der ikke er adresse-komponenter, brug mere pålidelig logik
         if (!data.address || Object.keys(data.address).length <= 1) {
-            // Men kun hvis vi er i en kyst-region (Danmark)
-            if (lat >= 54.5 && lat <= 57.8 && lng >= 8.0 && lng <= 15.2) {
-                const isWater = Math.random() > 0.3; // 70% chance for vand i danske farvande uden adresse
-                // Gem resultatet i cache med kortvarig udløb
-                waterLocationCache.set(cacheKey, isWater);
-                setTimeout(() => waterLocationCache.delete(cacheKey), 1000 * 60 * 5); // Udløb efter 5 minutter
-                return isWater;
-            }
+            // Brug heuristik baseret på danske koordinater
+            const isWater = isLikelyWaterLocation(lat, lng);
+            waterLocationCache.set(cacheKey, isWater);
+            setTimeout(() => waterLocationCache.delete(cacheKey), 1000 * 60 * 30); // Cache i 30 minutter
+            console.log(`Ingen adressedata for ${lat.toFixed(4)}, ${lng.toFixed(4)} - bruger heuristik: ${isWater ? 'VAND' : 'LAND'}`);
+            return isWater;
         }
         
+        // Hvis vi kommer hertil, har vi en gyldig adresse = det er land
+        waterLocationCache.set(cacheKey, false);
+        setTimeout(() => waterLocationCache.delete(cacheKey), 1000 * 60 * 60); // Cache i 1 time
+        console.log(`✓ Bekræftet LAND ved ${lat.toFixed(4)}, ${lng.toFixed(4)} - fundet gyldig adresse: ${data.display_name}`);
         return false;
     } catch (error) {
         console.log('Fejl ved kontrol af vand-lokation:', error);
-        // Hvis API'et fejler, gæt baseret på geografisk lokation
-        // I Danmark er der mange vand-områder, så hvis koordinaterne er uden for normale land-koordinater
-        if (lat >= 54.5 && lat <= 57.8 && lng >= 8.0 && lng <= 15.2) {
-            const isWater = Math.random() > 0.7; // 30% chance for vand hvis API fejler i Danmark
-            // Gem resultatet i cache med kortvarig udløb
-            waterLocationCache.set(cacheKey, isWater);
-            setTimeout(() => waterLocationCache.delete(cacheKey), 1000 * 60 * 5); // Udløb efter 5 minutter
-            return isWater;
-        }
-        return false;
+        // Hvis API'et fejler, brug heuristik i stedet for tilfældigt gæt
+        const isWater = isLikelyWaterLocation(lat, lng);
+        waterLocationCache.set(cacheKey, isWater);
+        setTimeout(() => waterLocationCache.delete(cacheKey), 1000 * 60 * 10); // Cache i 10 minutter ved fejl
+        console.log(`API-fejl for ${lat.toFixed(4)}, ${lng.toFixed(4)} - bruger heuristik: ${isWater ? 'VAND' : 'LAND'}`);
+        return isWater;
     }
 }
 

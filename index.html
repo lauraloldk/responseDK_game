@@ -359,7 +359,14 @@
             <button onclick="testDanishWaterLocations()" title="Test danske vand-lokationer" style="width: 100%; margin: 5px 0; padding: 10px;">
                 🗺️ Test vand-detektering
             </button>
-            <small style="color: var(--text); opacity: 0.7;">Tester detektering af danske vandområder</small>
+            <small style="color: var(--text); opacity: 0.7;">Tester detektering af danske vandområder med nøjagtighedsanalyse</small>
+        </div>
+        
+        <div style="margin: 10px 0;">
+            <button onclick="clearWaterCache()" title="Ryd vand-cache" style="width: 100%; margin: 5px 0; padding: 8px; background: #ff9800; color: white;">
+                🗑️ Ryd vand-cache
+            </button>
+            <small style="color: var(--text); opacity: 0.7;">Rydder cachet for vand-lokationer for friske tests</small>
         </div>
     </div>
 
@@ -1011,18 +1018,45 @@
         
         // Test specifikke danske vand-lokationer
         async function testDanishWaterLocations() {
+            console.log('🗺️ Tester danske vand-lokationer:');
+            console.log('Rydder cache for præcise tests...');
+            
+            // Ryd cache for at få friske resultater
+            if (typeof waterLocationCache !== 'undefined') {
+                waterLocationCache.clear();
+            }
+            
             const testLocations = [
-                { lat: 55.2, lng: 12.2, name: "Øresund" },
-                { lat: 57.7, lng: 10.6, name: "Skagerrak" },
-                { lat: 56.0, lng: 9.9, name: "Limfjorden" },
-                { lat: 55.4, lng: 11.1, name: "Store Bælt" },
-                { lat: 54.9, lng: 11.9, name: "Lolland kyst" }
+                { lat: 55.2, lng: 12.2, name: "Øresund (vand)", expected: true },
+                { lat: 57.7, lng: 10.6, name: "Skagerrak (vand)", expected: true },
+                { lat: 56.0, lng: 9.9, name: "Limfjorden (vand)", expected: true },
+                { lat: 55.4, lng: 11.1, name: "Store Bælt (vand)", expected: true },
+                { lat: 54.9, lng: 11.9, name: "Lolland kyst (vand)", expected: true },
+                { lat: 55.6761, lng: 12.5683, name: "København centrum (land)", expected: false },
+                { lat: 56.1629, lng: 10.2039, name: "Aarhus centrum (land)", expected: false },
+                { lat: 55.4038, lng: 10.4024, name: "Odense centrum (land)", expected: false }
             ];
             
-            console.log('Tester danske vand-lokationer:');
+            console.log('📊 Testresultater:');
+            let correctPredictions = 0;
+            
             for (const loc of testLocations) {
                 const isWater = await isLocationOnWater(loc.lat, loc.lng);
-                console.log(`${loc.name}: ${isWater ? '🌊 VAND' : '🏞️ LAND'}`);
+                const isCorrect = isWater === loc.expected;
+                correctPredictions += isCorrect ? 1 : 0;
+                
+                const status = isCorrect ? '✅' : '❌';
+                const result = isWater ? '🌊 VAND' : '🏞️ LAND';
+                console.log(`${status} ${loc.name}: ${result} (forventet: ${loc.expected ? 'VAND' : 'LAND'})`);
+            }
+            
+            const accuracy = (correctPredictions / testLocations.length * 100).toFixed(1);
+            console.log(`\n📈 Nøjagtighed: ${correctPredictions}/${testLocations.length} (${accuracy}%)`);
+            
+            if (accuracy < 70) {
+                console.warn('⚠️ Lav nøjagtighed - vand-detektering kan have problemer');
+            } else {
+                console.log('✅ Vand-detektering fungerer tilfredsstillende');
             }
         }
         
@@ -1086,6 +1120,19 @@
             
             // Gennemtving et nyt patrulje-punkt
             await moveToRandomPatrolPoint(patrollingVehicle);
+        }
+        
+        // Hjælpefunktion til at rydde vand-cache
+        function clearWaterCache() {
+            if (typeof waterLocationCache !== 'undefined') {
+                const cacheSize = waterLocationCache.size;
+                waterLocationCache.clear();
+                console.log(`🗑️ Ryddede ${cacheSize} cachede vand-lokationer`);
+                alert(`Cache ryddet! ${cacheSize} lokationer fjernet fra cache.`);
+            } else {
+                console.log('Vand-cache ikke tilgængelig');
+                alert('Cache ikke tilgængelig.');
+            }
         }
         // --- END TEST FUNCTIONS ---
     </script>
