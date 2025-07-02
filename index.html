@@ -240,6 +240,36 @@
             margin: 2px 0;
         }
 
+        /* Styling for køretøjsikoner */
+        .vehicle-ikon {
+            pointer-events: auto;
+            cursor: pointer;
+            transition: transform 0.2s ease;
+        }
+        
+        .vehicle-ikon:hover {
+            transform: scale(1.1);
+        }
+        
+        /* Forbedret styling for bevægende køretøjer */
+        .moving-vehicle {
+            pointer-events: auto;
+            cursor: pointer;
+            animation: pulseVehicle 2s infinite;
+            transition: transform 0.2s ease;
+        }
+        
+        .moving-vehicle:hover {
+            transform: scale(1.2);
+            animation-play-state: paused;
+        }
+        
+        @keyframes pulseVehicle {
+            0% { opacity: 1; }
+            50% { opacity: 0.7; }
+            100% { opacity: 1; }
+        }
+
     </style>
 </head>
 <body>
@@ -717,74 +747,81 @@
                     if (data && data.length > 0) {
                         showAddressResults(data, query);
                     } else {
-                        alert(`Ingen adresser fundet for "${query}".`);
+                        alert('Ingen resultater fundet for den angivne adresse.');
                     }
                 })
                 .catch(error => {
-                    console.error('Address search error:', error);
-                    alert('Fejl ved adressesøgning. Prøv igen senere.');
+                    console.error('Fejl ved søgning:', error);
+                    alert('Der opstod en fejl under søgningen. Prøv venligst igen.');
                 });
         }
 
         function showAddressResults(results, originalQuery) {
-            if (results.length === 1) {
-                // If only one result, go directly to it
-                goToAddress(results[0]);
-            } else {
-                // Show selection dialog for multiple results
-                let message = `Flere adresser fundet for "${originalQuery}":\n\n`;
-                results.forEach((result, index) => {
-                    message += `${index + 1}. ${result.display_name}\n`;
-                });
-                message += '\nVælg nummer (1-' + results.length + '):';
-                
-                const choice = prompt(message);
-                const choiceIndex = parseInt(choice) - 1;
-                
-                if (choiceIndex >= 0 && choiceIndex < results.length) {
-                    goToAddress(results[choiceIndex]);
-                } else if (choice !== null) {
-                    alert('Ugyldigt valg.');
-                }
-            }
+            Game.hideAllPanels(); // Hide other panels first
+            const panel = document.getElementById('køretøjsPanel');
+            
+            let resultsHTML = `
+                <button class="close-btn" onclick="Game.hideAllPanels()">X</button>
+                <h3>Adresse søgeresultater</h3>
+                <p>Søgte efter: <strong>${originalQuery}</strong></p>
+                <p>Klik på en adresse for at gå til den på kortet:</p>
+            `;
+            
+            results.forEach((result, index) => {
+                resultsHTML += `
+                    <div style="margin-bottom: 10px; padding: 8px; border: 1px solid var(--border); border-radius: 4px; background: var(--button-bg);">
+                        <strong>${result.display_name}</strong><br>
+                        <button onclick="goToAddress({lat: ${result.lat}, lng: ${result.lon}, name: '${result.display_name.replace(/'/g, "&apos;")}'})">Gå til adresse</button>
+                        <button onclick="Game.addStationAtAddress({lat: ${result.lat}, lng: ${result.lon}})">Tilføj Station</button>
+                    </div>
+                `;
+            });
+            
+            panel.innerHTML = resultsHTML;
+            panel.style.display = 'block';
         }
 
         function goToAddress(addressData) {
-            const lat = parseFloat(addressData.lat);
-            const lng = parseFloat(addressData.lon);
+            Game.hideAllPanels();
+            Game.map.setView([addressData.lat, addressData.lng], 15); // Zoom to the address
             
-            if (isNaN(lat) || isNaN(lng)) {
-                alert('Kunne ikke finde gyldig position for denne adresse.');
-                return;
-            }
-
-            // Store the searched address location in Game object
-            Game.searchedLocation = { lat, lng };
-            Game.searchedAddress = addressData.display_name;
-
-            // Center map on the address
-            Game.map.setView([lat, lng], 16);
-            
-            // Add a temporary marker to show the location
-            const addressMarker = L.marker([lat, lng])
+            // Optional: Add a temporary marker to show the searched location
+            const tempMarker = L.marker([addressData.lat, addressData.lng])
                 .addTo(Game.map)
-                .bindPopup(`📍 ${addressData.display_name}`)
+                .bindPopup(`<strong>Søgt adresse:</strong><br>${addressData.name}`)
                 .openPopup();
             
-            // Store reference to remove it later
-            Game.addressMarker = addressMarker;
-            
-            // Change the "Tilføj Station" button to "Tilføj Station Her"
-            const addStationBtn = document.querySelector('button[onclick="Game.activateStationMode()"]');
-            if (addStationBtn) {
-                addStationBtn.innerHTML = '📍 Tilføj Station Her';
-                addStationBtn.onclick = () => Game.addStationAtSearchedLocation();
-            }
-            
-            // Clear the search field
-            document.getElementById('addressSearch').value = '';
+            // Remove the temporary marker after 10 seconds
+            setTimeout(() => {
+                Game.map.removeLayer(tempMarker);
+            }, 10000);
         }
         // --- END ADDRESS SEARCH FUNCTIONS ---
+
+        // --- PATROL FUNCTIONS ---
+        function findVehicleById(vehicleId) {
+            for (const station of Game.stations) {
+                for (const vehicle of station.køretøjer) {
+                    if (vehicle.id === vehicleId) {
+                        return vehicle;
+                    }
+                }
+            }
+            return null;
+        }
+
+        function startVehiclePatrolling(vehicleId) {
+            startPatrolling(vehicleId);
+        }
+
+        function stopVehiclePatrolling(vehicleId) {
+            stopPatrolling(vehicleId);
+        }
+
+        function sendVehicleToHome(vehicleId) {
+            sendVehicleHome(vehicleId);
+        }
+        // --- END PATROL FUNCTIONS ---
     </script>
 </body>
 </html>
