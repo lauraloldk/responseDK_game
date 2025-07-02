@@ -251,6 +251,7 @@
         <button onclick="Game.toggleTheme()">🌓 Skift tema</button>
         <button onclick="showSaveLoadPanel('save')">💾 Gem spil</button>
         <button onclick="showSaveLoadPanel('load')">📂 Indlæs spil</button>
+        <button onclick="loadCustomROM()" title="Indlæs foruddefineret spil">🎮 Load ROM</button>
         <label for="intervalVælger">⏱️ Alarm-interval:</label>
         <select id="intervalVælger" onchange="Game.updateAlarmInterval()">
             <option value="60000">1 minut</option>
@@ -314,6 +315,8 @@
     <script src="alarmliste.js"></script>
     <script src="alarmer.js"></script>
     <script src="save.js"></script>
+    <script src="load.js"></script>
+    <script src="customROM.js"></script>
 
     <script>
         // Hoved Game objekt for at orkestrere de forskellige moduler
@@ -369,6 +372,12 @@
                     this.gameTime++;
                     this.updateGameTimeDisplay(); // Ny funktion til kun at opdatere tiden
                 }, 1000);
+                
+                // Load custom ROM if enabled (after a short delay to ensure everything is ready)
+                setTimeout(() => {
+                    loadCustomROMIfEnabled();
+                    this.updateStatusPanels(); // Update UI after potential ROM load
+                }, 100);
             },
 
             activateStationMode: function() {
@@ -730,16 +739,7 @@
             document.execCommand('copy');
             alert("Kode kopieret til udklipsholder!");
         }
-
-        function loadGameAction() {
-            const loadCodeInput = document.getElementById('loadCodeInput').value;
-            if (loadCodeInput) {
-                loadGameFromCode(loadCodeInput, Game, Game.map, updateVehicleMarkerIcon, createStationMarker, createVehicleMarker, clearAllMapElements);
-                Game.updateStatusPanels(); // Update UI after loading
-            } else {
-                alert("Indsæt venligst en gemt kode.");
-            }
-        }
+        // loadGameAction is now defined in load.js
         // --- END GLOBAL FUNCTIONS FOR SAVE/LOAD PANEL ---
 
         // --- ADDRESS SEARCH FUNCTIONS ---
