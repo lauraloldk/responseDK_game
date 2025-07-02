@@ -151,7 +151,7 @@ function cleanAlarmText(alarmText) {
  * @param {number} spawnRadiusKm - Radius i km omkring en station, hvor alarmen kan opstå.
  */
 async function createAlarm(stations, alarmsArray, alarmSound, spawnRadiusKm) { 
-    if (stations.length === 0) return;
+    if (stations.length === 0) return false;
 
     const randomStationIndex = Math.floor(Math.random() * stations.length);
     const station = stations[randomStationIndex];
@@ -211,6 +211,10 @@ async function createAlarm(stations, alarmsArray, alarmSound, spawnRadiusKm) {
         console.log('Kunne ikke finde en passende lokation efter 5 alarm-forsøg. Bruger fallback...');
         // Fallback: Vælg en land-only alarm og placer den på land
         const landOnlyAlarms = alarmTypes.filter(alarm => getSpawnRule(alarm) === 'land-only');
+        if (landOnlyAlarms.length === 0) {
+            console.log('Ingen land-only alarmer fundet til fallback!');
+            return false; // Kan ikke oprette alarm
+        }
         selectedAlarmType = landOnlyAlarms[Math.floor(Math.random() * landOnlyAlarms.length)];
         
         // Standard spawn-metode for land-only alarmer
@@ -242,6 +246,9 @@ async function createAlarm(stations, alarmsArray, alarmSound, spawnRadiusKm) {
     alarmsArray.push(alarm);
     alarmSound.play().catch(() => {}); // Afspiller alarmlyd, fanger fejl hvis lyden ikke kan afspilles
     Game.updateStatusPanels(); // Vigtigt: Opdater UI når en ny alarm er oprettet
+    
+    console.log(`✅ Alarm oprettet: "${cleanedAlarmType}" på ${lat.toFixed(4)}, ${lng.toFixed(4)}`);
+    return true; // Alarm blev oprettet succesfuldt
 }
 
 /**
@@ -684,21 +691,66 @@ function stopPatrolling(vehicleId) {
  * Flytter et køretøj til et tilfældigt punkt inden for patrouljeringsområdet
  * @param {Object} vehicle - Køretøjsobjektet
  */
-function moveToRandomPatrolPoint(vehicle) {
+async function moveToRandomPatrolPoint(vehicle) {
     if (!vehicle.patrolling || vehicle.status !== 'patrouillerer' || vehicle.animationPaused) {
         return;
     }
     
     const station = vehicle.station;
     const radiusKm = 50; // Fast 50 km radius for patrouljering
+    const isVehicleHelicopter = isHelicopter(vehicle);
     
-    // Generer tilfældig position inden for radius
     let lat, lng, dist;
-    do {
-        lat = station.position.lat + (Math.random() - 0.5) * (radiusKm / 111.32);
-        lng = station.position.lng + (Math.random() - 0.5) * (radiusKm / (111.32 * Math.cos(station.position.lat * Math.PI / 180)));
-        dist = distanceKm(station.position.lat, station.position.lng, lat, lng);
-    } while (dist > radiusKm);
+    let validLocation = false;
+    let attempts = 0;
+    const maxAttempts = 15; // Færre forsøg for patruljering
+    
+    // Find en passende patrulje-lokation
+    while (!validLocation && attempts < maxAttempts) {
+        // Generer tilfældig position inden for radius
+        do {
+            lat = station.position.lat + (Math.random() - 0.5) * (radiusKm / 111.32);
+            lng = station.position.lng + (Math.random() - 0.5) * (radiusKm / (111.32 * Math.cos(station.position.lat * Math.PI / 180)));
+            dist = distanceKm(station.position.lat, station.position.lng, lat, lng);
+        } while (dist > radiusKm);
+        
+        if (isVehicleHelicopter) {
+            // Helikoptere kan flyve hvor som helst (både land og vand)
+            validLocation = true;
+            console.log(`🚁 Helikopter ${vehicle.navn} flyver til patrulje-punkt: ${lat.toFixed(4)}, ${lng.toFixed(4)} (kan være både land/vand)`);
+        } else {
+            // Landkøretøjer skal holde sig på land
+            try {
+                const isOnWater = await isLocationOnWater(lat, lng);
+                if (!isOnWater) {
+                    validLocation = true;
+                    console.log(`🚗 ${vehicle.navn} kører til land-patrulje: ${lat.toFixed(4)}, ${lng.toFixed(4)}`);
+                } else {
+                    console.log(`💧 ${vehicle.navn} springer vand-lokation over: ${lat.toFixed(4)}, ${lng.toFixed(4)}`);
+                }
+            } catch (error) {
+                // Hvis vand-tjek fejler, brug heuristik
+                const likelyWater = isLikelyWaterLocation(lat, lng);
+                if (!likelyWater) {
+                    validLocation = true;
+                    console.log(`🚗 ${vehicle.navn} bruger heuristik (sandsynligvis land): ${lat.toFixed(4)}, ${lng.toFixed(4)}`);
+                } else {
+                    console.log(`💧 ${vehicle.navn} springer sandsynlig vand-lokation over (heuristik): ${lat.toFixed(4)}, ${lng.toFixed(4)}`);
+                }
+            }
+        }
+        
+        attempts++;
+    }
+    
+    // Hvis ingen valid lokation blev fundet, brug en sikker fallback nær stationen
+    if (!validLocation) {
+        console.log(`⚠️ Kunne ikke finde passende patrulje-lokation for ${vehicle.navn}, bruger fallback nær station`);
+        // Fallback: Lille radius omkring stationen (sandsynligvis land)
+        const fallbackRadius = 5; // 5 km radius
+        lat = station.position.lat + (Math.random() - 0.5) * (fallbackRadius / 111.32);
+        lng = station.position.lng + (Math.random() - 0.5) * (fallbackRadius / (111.32 * Math.cos(station.position.lat * Math.PI / 180)));
+    }
     
     const destination = { lat, lng };
     vehicle.patrolDestination = destination;
@@ -707,9 +759,9 @@ function moveToRandomPatrolPoint(vehicle) {
     animateVehicleToDestination(vehicle, destination, () => {
         // Når køretøjet når destinationen, vent lidt og vælg så et nyt punkt
         if (vehicle.patrolling && vehicle.status === 'patrouillerer' && !vehicle.animationPaused) {
-            setTimeout(() => {
+            setTimeout(async () => {
                 if (!vehicle.animationPaused) {
-                    moveToRandomPatrolPoint(vehicle);
+                    await moveToRandomPatrolPoint(vehicle);
                 }
             }, 3000 + Math.random() * 7000); // Vent 3-10 sekunder
         }

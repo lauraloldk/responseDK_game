@@ -81,7 +81,7 @@
         }
 
         /* Paneler generelt */
-        #køretøjsPanel, #statusPanel, #logPanel, #stationPanel {
+        #køretøjsPanel, #statusPanel, #logPanel, #stationPanel, #testPanel {
             position: absolute;
             top: 70px;
             left: 20px;
@@ -276,7 +276,7 @@
     <div id="controls">
         <button onclick="Game.activateStationMode()">➕ Tilføj Station</button>
         <button onclick="Game.showVehicleSelectionPanel()">🚨 Alarmer køretøj</button>
-        <button onclick="testWaterAlarm()" title="Test vand-alarm funktionalitet">🌊 Test vand-alarm</button>
+        <button onclick="Game.showTestPanel()" title="Åbn test-værktøjer">🔧 Test-værktøjer</button>
         <button onclick="Game.showStatusPanel()">📋 Status</button>
         <button onclick="Game.toggleStationsVisibility()">🏢 Vis/Skjul stationer</button>
         <button onclick="Game.toggleTheme()">🌓 Skift tema</button>
@@ -322,6 +322,39 @@
     </div>
     <div id="logPanel"></div>
     <div id="stationPanel"></div>
+    <div id="testPanel">
+        <button class="close-btn" onclick="Game.hideAllPanels()">X</button>
+        <h3>🔧 Test-værktøjer</h3>
+        <p>Værktøjer til at teste alarm- og patrulje-funktionalitet:</p>
+        
+        <div style="margin: 10px 0;">
+            <button onclick="testWaterAlarm()" title="Test vand-alarm funktionalitet" style="width: 100%; margin: 5px 0; padding: 10px;">
+                🌊 Test vand-alarm
+            </button>
+            <small style="color: var(--text); opacity: 0.7;">Forsøger at spawne en alarm, der kun kan være på vand</small>
+        </div>
+        
+        <div style="margin: 10px 0;">
+            <button onclick="testLandAlarm()" title="Test land-alarm funktionalitet" style="width: 100%; margin: 5px 0; padding: 10px;">
+                🏞️ Test land-alarm
+            </button>
+            <small style="color: var(--text); opacity: 0.7;">Spawner en standard alarm på land</small>
+        </div>
+        
+        <div style="margin: 10px 0;">
+            <button onclick="testPatrolWaterLogic()" title="Test patrulje vand/land logik" style="width: 100%; margin: 5px 0; padding: 10px;">
+                🚁 Test patrulje-logik
+            </button>
+            <small style="color: var(--text); opacity: 0.7;">Tester om køretøjer respekterer vand/land grænser</small>
+        </div>
+        
+        <div style="margin: 10px 0;">
+            <button onclick="testDanishWaterLocations()" title="Test danske vand-lokationer" style="width: 100%; margin: 5px 0; padding: 10px;">
+                🗺️ Test vand-detektering
+            </button>
+            <small style="color: var(--text); opacity: 0.7;">Tester detektering af danske vandområder</small>
+        </div>
+    </div>
 
     <div id="saveLoadPanel">
         <h2 id="panelTitle"></h2>
@@ -493,6 +526,16 @@
                 }
             },
 
+            showTestPanel: function() {
+                const panel = document.getElementById("testPanel");
+                if (panel.style.display === 'block') { 
+                    panel.style.display = 'none'; 
+                } else {
+                    this.hideAllPanels(); 
+                    panel.style.display = 'block'; 
+                }
+            },
+
             toggleStationsVisibility: function() {
                 toggleStationMarkers(this.stations); 
             },
@@ -504,38 +547,50 @@
 
             updateAlarmInterval: function() {
                 const selectedValue = document.getElementById("intervalVælger").value;
-                if (this.alarmTimer) clearInterval(this.alarmTimer);
+                if (this.alarmTimer) clearTimeout(this.alarmTimer);
                 this.randomAlarmMode = false; // Reset random mode by default
                 
                 if (selectedValue === "pause") {
                     // Set interval to 24 hours (24 * 60 * 60 * 1000 = 86400000 ms)
-                    this.alarmTimer = setInterval(async () => {
-                        await createAlarm(this.stations, this.alarms, this.alarmSound, this.ALARM_SPAWN_RADIUS_KM); 
-                    }, 86400000);
+                    this.scheduleNextAlarm(86400000);
                 } else if (selectedValue === "random") {
                     this.randomAlarmMode = true;
                     this.scheduleRandomAlarm();
                 } else {
                     // Normal interval
                     const ms = parseInt(selectedValue);
-                    this.alarmTimer = setInterval(async () => {
-                        await createAlarm(this.stations, this.alarms, this.alarmSound, this.ALARM_SPAWN_RADIUS_KM); 
-                    }, ms);
+                    this.currentAlarmInterval = ms; // Gem det nuværende interval
+                    this.scheduleNextAlarm(ms);
                 }
             },
 
+            // Ny funktion til at schedule næste alarm kun efter succes
+            scheduleNextAlarm: function(intervalMs) {
+                this.alarmTimer = setTimeout(async () => {
+                    const success = await createAlarm(this.stations, this.alarms, this.alarmSound, this.ALARM_SPAWN_RADIUS_KM);
+                    if (success) {
+                        // Kun schedule næste alarm hvis denne lykkedes
+                        if (!this.randomAlarmMode) {
+                            this.scheduleNextAlarm(intervalMs);
+                        }
+                    } else {
+                        // Prøv igen efter 10 sekunder hvis alarmen fejlede
+                        console.log('Alarm oprettelse fejlede, prøver igen om 10 sekunder...');
+                        this.scheduleNextAlarm(10000);
+                    }
+                }, intervalMs);
+            },
+
             pauseAlarms: function() {
-                if (this.alarmTimer) clearInterval(this.alarmTimer);
+                if (this.alarmTimer) clearTimeout(this.alarmTimer);
                 this.randomAlarmMode = false;
                 // Set interval to 24 hours (24 * 60 * 60 * 1000 = 86400000 ms)
-                this.alarmTimer = setInterval(async () => {
-                    await createAlarm(this.stations, this.alarms, this.alarmSound, this.ALARM_SPAWN_RADIUS_KM); 
-                }, 86400000);
+                this.scheduleNextAlarm(86400000);
                 alert("Alarmer sat på pause - næste alarm om 24 timer");
             },
 
             randomAlarmInterval: function() {
-                if (this.alarmTimer) clearInterval(this.alarmTimer);
+                if (this.alarmTimer) clearTimeout(this.alarmTimer);
                 this.randomAlarmMode = true;
                 this.scheduleRandomAlarm();
                 alert("Tilfældig alarm-interval aktiveret (10 sekunder - 5 minutter)");
@@ -550,8 +605,15 @@
                 const randomInterval = Math.floor(Math.random() * (maxInterval - minInterval + 1)) + minInterval;
                 
                 this.alarmTimer = setTimeout(async () => {
-                    await createAlarm(this.stations, this.alarms, this.alarmSound, this.ALARM_SPAWN_RADIUS_KM);
-                    this.scheduleRandomAlarm(); // Schedule next random alarm
+                    const success = await createAlarm(this.stations, this.alarms, this.alarmSound, this.ALARM_SPAWN_RADIUS_KM);
+                    if (success) {
+                        // Kun schedule næste tilfældige alarm hvis denne lykkedes
+                        this.scheduleRandomAlarm();
+                    } else {
+                        // Prøv igen med et kortere interval hvis alarmen fejlede
+                        console.log('Random alarm oprettelse fejlede, prøver igen om 10 sekunder...');
+                        this.alarmTimer = setTimeout(() => this.scheduleRandomAlarm(), 10000);
+                    }
                 }, randomInterval);
             },
             
@@ -594,6 +656,7 @@
                 document.getElementById("køretøjsPanel").style.display = 'none';
                 document.getElementById("statusPanel").style.display = 'none';
                 document.getElementById("logPanel").style.display = 'none'; 
+                document.getElementById("testPanel").style.display = 'none'; 
                 document.getElementById("saveLoadPanel").style.display = 'none'; 
             },
 
@@ -825,14 +888,86 @@
         // --- END PATROL FUNCTIONS ---
         
         // --- TEST FUNCTIONS ---
-        function testWaterAlarm() {
+        async function testWaterAlarm() {
             if (Game.stations.length === 0) {
                 alert('Tilføj venligst mindst én station først.');
                 return;
             }
             
             console.log('Tester vand-alarm funktionalitet...');
-            createAlarm(Game.stations, Game.alarms, Game.alarmSound, Game.ALARM_SPAWN_RADIUS_KM);
+            
+            // Gennemtving en vand-alarm til test
+            const waterAlarms = alarmTypes.filter(alarm => alarm.includes('#only-on-water#'));
+            if (waterAlarms.length === 0) {
+                alert('Ingen vand-alarmer fundet i alarmlisten!');
+                return;
+            }
+            
+            const selectedWaterAlarm = waterAlarms[Math.floor(Math.random() * waterAlarms.length)];
+            console.log(`Forsøger at spawne vand-alarm: "${selectedWaterAlarm}"`);
+            
+            // Brug createAlarm funktionalitet men med en specifik alarm-type
+            await createTestWaterAlarm(Game.stations, Game.alarms, Game.alarmSound, Game.ALARM_SPAWN_RADIUS_KM, selectedWaterAlarm);
+        }
+        
+        // Specialiseret funktion til at teste vand-alarmer
+        async function createTestWaterAlarm(stations, alarmsArray, alarmSound, spawnRadiusKm, forcedAlarmType) {
+            if (stations.length === 0) return;
+
+            const randomStationIndex = Math.floor(Math.random() * stations.length);
+            const station = stations[randomStationIndex];
+            
+            let lat, lng, dist;
+            let validLocation = false;
+            let attempts = 0;
+            const maxAttempts = 30; // Flere forsøg for test
+            
+            console.log(`Søger efter vand-lokation for "${forcedAlarmType}"...`);
+            
+            while (!validLocation && attempts < maxAttempts) {
+                // Generer tilfældig lokation inden for radius
+                lat = station.position.lat + (Math.random() - 0.5) * (spawnRadiusKm / 111.32);
+                lng = station.position.lng + (Math.random() - 0.5) * (spawnRadiusKm / (111.32 * Math.cos(station.position.lat * Math.PI / 180)));
+                dist = distanceKm(station.position.lat, station.position.lng, lat, lng);
+                
+                if (dist <= spawnRadiusKm) {
+                    const isOnWater = await isLocationOnWater(lat, lng);
+                    console.log(`Test lokation ${lat.toFixed(4)}, ${lng.toFixed(4)} - på vand: ${isOnWater}`);
+                    
+                    if (isOnWater) {
+                        validLocation = true;
+                        console.log('✓ Vand-lokation fundet for test!');
+                    }
+                }
+                
+                attempts++;
+            }
+            
+            if (!validLocation) {
+                alert(`Kunne ikke finde en vand-lokation efter ${maxAttempts} forsøg. Prøv med en større radius eller en anden station.`);
+                return;
+            }
+            
+            // Rens alarm-teksten for tags
+            const cleanedAlarmType = cleanAlarmText(forcedAlarmType);
+            
+            const id = nextAlarmId++;
+            const alarm = { 
+                id, 
+                type: cleanedAlarmType, 
+                position: { lat, lng }, 
+                marker: null, 
+                dispatchedVehiclesCount: 0,
+                resolvedVehiclesCount: 0,
+                creationTime: Game.gameTime
+            };
+            
+            alarm.marker = createAlarmMarker({ lat, lng }, id, cleanedAlarmType, alarm); 
+            alarmsArray.push(alarm);
+            alarmSound.play().catch(() => {});
+            Game.updateStatusPanels();
+            
+            console.log(`🌊 Test vand-alarm spawnet: "${cleanedAlarmType}" på ${lat.toFixed(4)}, ${lng.toFixed(4)}`);
         }
         
         // Test specifikke danske vand-lokationer
@@ -850,6 +985,68 @@
                 const isWater = await isLocationOnWater(loc.lat, loc.lng);
                 console.log(`${loc.name}: ${isWater ? '🌊 VAND' : '🏞️ LAND'}`);
             }
+        }
+        
+        // Test land-alarm funktionalitet
+        async function testLandAlarm() {
+            if (Game.stations.length === 0) {
+                alert('Tilføj venligst mindst én station først.');
+                return;
+            }
+            
+            console.log('Tester land-alarm funktionalitet...');
+            
+            const landAlarms = alarmTypes.filter(alarm => 
+                !alarm.includes('#only-on-water#') && !alarm.includes('#can-spawn-on-water#')
+            );
+            
+            if (landAlarms.length === 0) {
+                alert('Ingen land-alarmer fundet!');
+                return;
+            }
+            
+            const selectedLandAlarm = landAlarms[Math.floor(Math.random() * landAlarms.length)];
+            console.log(`Forsøger at spawne land-alarm: "${selectedLandAlarm}"`);
+            
+            // Brug standard createAlarm - den burde spawne på land
+            await createAlarm(Game.stations, Game.alarms, Game.alarmSound, Game.ALARM_SPAWN_RADIUS_KM);
+        }
+        
+        // Test patrulje vand/land logik
+        async function testPatrolWaterLogic() {
+            if (Game.stations.length === 0) {
+                alert('Tilføj venligst mindst én station først.');
+                return;
+            }
+            
+            // Find det første køretøj der patrouillerer
+            let patrollingVehicle = null;
+            for (const station of Game.stations) {
+                for (const vehicle of station.køretøjer) {
+                    if (vehicle.status === 'patrouillerer') {
+                        patrollingVehicle = vehicle;
+                        break;
+                    }
+                }
+                if (patrollingVehicle) break;
+            }
+            
+            if (!patrollingVehicle) {
+                alert('Ingen køretøjer patrouillerer i øjeblikket. Start en patrulje først.');
+                return;
+            }
+            
+            const isHeli = isHelicopter(patrollingVehicle);
+            console.log(`🔍 Testing patrulje-logik for ${patrollingVehicle.navn} (${isHeli ? 'Helikopter' : 'Landkøretøj'})`);
+            
+            if (isHeli) {
+                console.log('🚁 Helikopter kan flyve over vand og land');
+            } else {
+                console.log('🚗 Landkøretøj skal holde sig på land');
+            }
+            
+            // Gennemtving et nyt patrulje-punkt
+            await moveToRandomPatrolPoint(patrollingVehicle);
         }
         // --- END TEST FUNCTIONS ---
     </script>
