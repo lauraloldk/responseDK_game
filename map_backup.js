@@ -61,14 +61,10 @@ function createVehicleMarker(position, name, type, vehicleObject) {
     let vehicleSymbol = '🚗'; // Standard bil ikon for "andet"
     if (type && type.toLowerCase().includes('helikopter')) {
         vehicleSymbol = '🚁'; // Helikopter ikon
-    } else if (type && (type.toLowerCase().includes('brandvæsen') || type.toLowerCase().includes('brand'))) {
+    } else if (type && type.toLowerCase().includes('brandvæsen')) {
         vehicleSymbol = '🚒'; // Brandbil ikon
     } else if (type && type.toLowerCase().includes('politi')) {
         vehicleSymbol = '🚓'; // Politibil ikon
-    } else if (type && type.toLowerCase().includes('ambulance')) {
-        vehicleSymbol = '🚑'; // Ambulance ikon
-    } else if (type && (type.toLowerCase().includes('flatbed') || type.toLowerCase().includes('fejeblad') || type.toLowerCase().includes('bergning') || type.toLowerCase().includes('autohjælp'))) {
-        vehicleSymbol = '🚛'; // Flatbed/tow truck ikon
     }
 
     // Opretter ikonet dynamisk, så navnet kan inkluderes direkte i HTML'en
@@ -117,14 +113,10 @@ function updateVehicleMarkerIcon(vehicle) {
     let vehicleSymbol = '🚗'; // Standard bil ikon for "andet"
     if (vehicle.type && vehicle.type.toLowerCase().includes('helikopter')) {
         vehicleSymbol = '🚁'; // Helikopter ikon
-    } else if (vehicle.type && (vehicle.type.toLowerCase().includes('brandvæsen') || vehicle.type.toLowerCase().includes('brand'))) {
+    } else if (vehicle.type && vehicle.type.toLowerCase().includes('brandvæsen')) {
         vehicleSymbol = '🚒'; // Brandbil ikon
     } else if (vehicle.type && vehicle.type.toLowerCase().includes('politi')) {
         vehicleSymbol = '🚓'; // Politibil ikon
-    } else if (vehicle.type && vehicle.type.toLowerCase().includes('ambulance')) {
-        vehicleSymbol = '🚑'; // Ambulance ikon
-    } else if (vehicle.type && (vehicle.type.toLowerCase().includes('flatbed') || vehicle.type.toLowerCase().includes('fejeblad') || vehicle.type.toLowerCase().includes('bergning') || vehicle.type.toLowerCase().includes('autohjælp'))) {
-        vehicleSymbol = '🚛'; // Flatbed/tow truck ikon
     }
 
     // Opretter et nyt L.divIcon for at opdatere markøren
