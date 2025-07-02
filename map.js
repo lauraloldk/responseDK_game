@@ -57,16 +57,31 @@ function createVehicleMarker(position, name, type, vehicleObject) {
         iconColor = 'yellow';
     }
 
+    // Bestem køretøjsikon baseret på type
+    let vehicleSymbol = '🚗'; // Standard bil ikon for "andet"
+    if (type && type.toLowerCase().includes('helikopter')) {
+        vehicleSymbol = '🚁'; // Helikopter ikon
+    } else if (type && (type.toLowerCase().includes('brandvæsen') || type.toLowerCase().includes('brand'))) {
+        vehicleSymbol = '🚒'; // Brandbil ikon
+    } else if (type && type.toLowerCase().includes('politi')) {
+        vehicleSymbol = '🚓'; // Politibil ikon
+    } else if (type && type.toLowerCase().includes('ambulance')) {
+        vehicleSymbol = '🚑'; // Ambulance ikon
+    } else if (type && (type.toLowerCase().includes('flatbed') || type.toLowerCase().includes('fejeblad') || type.toLowerCase().includes('bergning') || type.toLowerCase().includes('autohjælp'))) {
+        vehicleSymbol = '🚛'; // Flatbed/tow truck ikon
+    }
+
     // Opretter ikonet dynamisk, så navnet kan inkluderes direkte i HTML'en
     const dynamicVehicleIcon = L.divIcon({
         className: 'vehicle-ikon',
         html: `
             <div style='text-align:center;'>
                 <div style='width:12px;height:12px;background:${iconColor};border:2px solid #444;margin:auto;border-radius:4px;'></div>
+                <div style='font-size:12px;margin-top:-2px;'>${vehicleSymbol}</div>
                 <div style='font-size:10px;background:white;color:black;padding:2px 6px;border-radius:4px;margin-top:2px;width:60px;white-space: nowrap; overflow: hidden; text-overflow: ellipsis;'>${name}</div>
             </div>`, // Inkluder navnet direkte i ikonet
-        iconSize: [70, 40], // Juster størrelse for at give plads til tekst
-        iconAnchor: [35, 20], // Juster anker
+        iconSize: [70, 45], // Lidt højere for at give plads til helikopter-ikonet
+        iconAnchor: [35, 22], // Juster anker
         popupAnchor: [0, -7]
     });
 
@@ -98,16 +113,31 @@ function updateVehicleMarkerIcon(vehicle) {
         iconColor = 'yellow';
     }
 
+    // Bestem køretøjsikon baseret på type
+    let vehicleSymbol = '🚗'; // Standard bil ikon for "andet"
+    if (vehicle.type && vehicle.type.toLowerCase().includes('helikopter')) {
+        vehicleSymbol = '🚁'; // Helikopter ikon
+    } else if (vehicle.type && (vehicle.type.toLowerCase().includes('brandvæsen') || vehicle.type.toLowerCase().includes('brand'))) {
+        vehicleSymbol = '🚒'; // Brandbil ikon
+    } else if (vehicle.type && vehicle.type.toLowerCase().includes('politi')) {
+        vehicleSymbol = '🚓'; // Politibil ikon
+    } else if (vehicle.type && vehicle.type.toLowerCase().includes('ambulance')) {
+        vehicleSymbol = '🚑'; // Ambulance ikon
+    } else if (vehicle.type && (vehicle.type.toLowerCase().includes('flatbed') || vehicle.type.toLowerCase().includes('fejeblad') || vehicle.type.toLowerCase().includes('bergning') || vehicle.type.toLowerCase().includes('autohjælp'))) {
+        vehicleSymbol = '🚛'; // Flatbed/tow truck ikon
+    }
+
     // Opretter et nyt L.divIcon for at opdatere markøren
     const newIcon = L.divIcon({
         className: 'vehicle-ikon',
         html: `
             <div style='text-align:center;'>
                 <div style='width:12px;height:12px;background:${iconColor};border:2px solid #444;margin:auto;border-radius:4px;'></div>
+                <div style='font-size:12px;margin-top:-2px;'>${vehicleSymbol}</div>
                 <div style='font-size:10px;background:white;color:black;padding:2px 6px;border-radius:4px;margin-top:2px;width:60px;white-space: nowrap; overflow: hidden; text-overflow: ellipsis;'>${vehicle.navn}</div>
             </div>`, // Brug vehicle.navn her
-        iconSize: [70, 40],
-        iconAnchor: [35, 20],
+        iconSize: [70, 45], // Lidt højere for at give plads til helikopter-ikonet
+        iconAnchor: [35, 22], // Justeret anker
         popupAnchor: [0, -7]
     });
     vehicle.marker.setIcon(newIcon);
