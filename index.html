@@ -230,7 +230,14 @@
         .vehicle-item-disabled {
             color: #888;
             font-style: italic;
-            padding-left: 20px;
+            padding: 8px;
+            margin: 2px 0;
+        }
+        
+        .vehicle-item {
+            padding: 8px;
+            margin: 2px 0;
+            border-radius: 4px;
         }
         
         .vehicle-redirectable {
@@ -876,14 +883,46 @@
 
         function startVehiclePatrolling(vehicleId) {
             startPatrolling(vehicleId);
+            // Opdater stationspanel hvis det er åbent
+            updateStationPanelIfOpen();
+            // Opdater køretøjspanel hvis det er åbnt
+            updateVehiclePanelIfOpen();
         }
 
         function stopVehiclePatrolling(vehicleId) {
             stopPatrolling(vehicleId);
+            // Opdater stationspanel hvis det er åbent
+            updateStationPanelIfOpen();
+            // Opdater køretøjspanel hvis det er åbnt
+            updateVehiclePanelIfOpen();
         }
 
         function sendVehicleToHome(vehicleId) {
             sendVehicleHome(vehicleId);
+            // Opdater stationspanel hvis det er åbent
+            updateStationPanelIfOpen();
+            // Opdater køretøjspanel hvis det er åbnt
+            updateVehiclePanelIfOpen();
+        }
+
+        // Hjælpefunktion til at opdatere stationspanel hvis det er åbent
+        function updateStationPanelIfOpen() {
+            const stationPanel = document.getElementById("stationPanel");
+            if (stationPanel.style.display === 'block' && Game.selectedStation) {
+                displayStationPanel(Game.selectedStation, Game.stations);
+            }
+        }
+
+        // Hjælpefunktion til at opdatere køretøjspanel hvis det er åbent
+        function updateVehiclePanelIfOpen() {
+            const vehiclePanel = document.getElementById("køretøjsPanel");
+            if (vehiclePanel.style.display === 'block') {
+                // Tjek om panelet viser køretøjsvalg (ikke adressesøgning eller andre ting)
+                const vehicleSelectionList = document.getElementById("vehicleSelectionList");
+                if (vehicleSelectionList) {
+                    displayVehicleSelectionPanel(Game.stations);
+                }
+            }
         }
         // --- END PATROL FUNCTIONS ---
         
