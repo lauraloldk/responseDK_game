@@ -648,62 +648,18 @@
         }
 
         // --- Opdateret showStationDetails ---
-        function showStationDetails(station) {
-            const panel = document.getElementById("stationPanel");
-            // If the same station is clicked again and panel is visible, hide it
-            if (Game.selectedStation === station && panel.style.display === 'block') {
-                panel.style.display = 'none';
-                Game.selectedStation = null;
-            } else {
-                Game.selectedStation = station; // Set current selected station
-                Game.hideAllPanels(); // Hide all other panels
-                displayStationPanel(station, Game.stations); // Populate and display the station panel
-                panel.style.display = 'block'; // Show the station panel
-            }
-        }
+        // This function is now in stationer.js
         // --- END Opdateret showStationDetails ---
 
         // --- RETTET: addVehicleToSelectedStation ---
-        function addVehicleToSelectedStation() {
-            if (Game.selectedStation) {
-                // Kald addVehicleToStation funktionen direkte fra stationer.js
-                // Denne funktion håndterer selv prompts for navn og type.
-                addVehicleToStation(Game.selectedStation, Game.map); 
-                // Opdater visningen af stationens panel for at vise det nye køretøj
-                displayStationPanel(Game.selectedStation, Game.stations); 
-                // Opdater den globale statusoversigt
-                Game.updateStatusPanels(); 
-            }
-        }
+        // This function is now in stationer.js
         // --- SLUT RETTELSE ---
 
-        function deleteVehicleFromStation(stationIdx, vehicleIdx) {
-            const station = Game.stations[stationIdx];
-            deleteVehicle(station, vehicleIdx, Game.map); 
-            displayStationPanel(station, Game.stations); 
-            Game.updateStatusPanels(); // Update status after deleting vehicle
-        }
-
-        function editVehicleInStation(stationIdx, vehicleIdx) {
-            alert("Redigeringsfunktion er ikke implementeret endnu.");
-        }
-
-        function deleteSelectedStation() {
-            if (Game.selectedStation) {
-                deleteStation(Game.selectedStation, Game.stations, Game.map); 
-                Game.hideAllPanels(); 
-                Game.selectedStation = null;
-                Game.updateStatusPanels(); // Update status after deleting station
-            }
-        }
-
-        function renameSelectedStation() {
-            if (Game.selectedStation) {
-                renameStation(Game.selectedStation); 
-                displayStationPanel(Game.selectedStation, Game.stations); 
-                Game.updateStatusPanels(); // Update status after renaming station
-            }
-        }
+        // These functions are now in stationer.js:
+        // - deleteVehicleFromStation()
+        // - editVehicleInStation() 
+        // - deleteSelectedStation()
+        // - renameSelectedStation()
 
         // --- GLOBAL FUNCTIONS FOR SAVE/LOAD PANEL ---
         function showSaveLoadPanel(mode) {

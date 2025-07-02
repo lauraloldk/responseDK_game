@@ -210,6 +210,51 @@ function renameStation(station) {
     }
 }
 
+// Funktion til at redigere et køretøj (navn og type)
+function editVehicleInStation(stationIdx, vehicleIdx) {
+    const station = Game.stations[stationIdx];
+    const vehicle = station.køretøjer[vehicleIdx];
+    
+    if (!vehicle) {
+        alert("Køretøj ikke fundet.");
+        return;
+    }
+    
+    // Rediger navn
+    const newName = prompt("Indtast nyt navn for køretøjet:", vehicle.navn);
+    if (newName === null) return; // Bruger annullerede
+    
+    if (newName.trim() === "") {
+        alert("Køretøjets navn må ikke være tomt.");
+        return;
+    }
+    
+    // Rediger type
+    const newType = prompt("Indtast ny type for køretøjet:", vehicle.type);
+    if (newType === null) return; // Bruger annullerede
+    
+    if (newType.trim() === "") {
+        alert("Køretøjets type må ikke være tom.");
+        return;
+    }
+    
+    // Opdater køretøjets egenskaber
+    vehicle.navn = newName.trim();
+    vehicle.type = newType.trim();
+    
+    // Opdater markør-ikonet med de nye oplysninger
+    if (vehicle.marker && typeof updateVehicleMarkerIcon === 'function') {
+        updateVehicleMarkerIcon(vehicle);
+    }
+    
+    // Opdater stationspanelet for at vise ændringerne
+    displayStationPanel(station, Game.stations);
+    
+    // Opdater status paneler
+    Game.updateStatusPanels();
+    
+    alert(`${vehicle.navn} er blevet opdateret.`);
+}
 
 // Funktion til at vise listen over tilgængelige køretøjer for udsendelse
 function displayVehicleSelectionPanel(stations) {
@@ -298,4 +343,61 @@ function filterVehicles() {
             stationGroup.style.display = 'none';
         }
     });
+}
+
+// --- GLOBALE FUNKTIONER FLYTTET FRA INDEX.HTML ---
+
+// Funktion til at vise stationsdetaljer (kaldt fra både HTML og JavaScript)
+function showStationDetails(station) {
+    const panel = document.getElementById("stationPanel");
+    // If the same station is clicked again and panel is visible, hide it
+    if (Game.selectedStation === station && panel.style.display === 'block') {
+        panel.style.display = 'none';
+        Game.selectedStation = null;
+    } else {
+        Game.selectedStation = station; // Set current selected station
+        Game.hideAllPanels(); // Hide all other panels
+        displayStationPanel(station, Game.stations); // Populate and display the station panel
+        panel.style.display = 'block'; // Show the station panel
+    }
+}
+
+// Funktion til at tilføje køretøj til den valgte station
+function addVehicleToSelectedStation() {
+    if (Game.selectedStation) {
+        // Kald addVehicleToStation funktionen direkte fra stationer.js
+        // Denne funktion håndterer selv prompts for navn og type.
+        addVehicleToStation(Game.selectedStation, Game.map); 
+        // Opdater visningen af stationens panel for at vise det nye køretøj
+        displayStationPanel(Game.selectedStation, Game.stations); 
+        // Opdater den globale statusoversigt
+        Game.updateStatusPanels(); 
+    }
+}
+
+// Funktion til at slette køretøj fra station (kaldt fra HTML)
+function deleteVehicleFromStation(stationIdx, vehicleIdx) {
+    const station = Game.stations[stationIdx];
+    deleteVehicle(station, vehicleIdx, Game.map); 
+    displayStationPanel(station, Game.stations); 
+    Game.updateStatusPanels(); // Update status after deleting vehicle
+}
+
+// Funktion til at slette den valgte station
+function deleteSelectedStation() {
+    if (Game.selectedStation) {
+        deleteStation(Game.selectedStation, Game.stations, Game.map); 
+        Game.hideAllPanels(); 
+        Game.selectedStation = null;
+        Game.updateStatusPanels(); // Update status after deleting station
+    }
+}
+
+// Funktion til at omdøbe den valgte station
+function renameSelectedStation() {
+    if (Game.selectedStation) {
+        renameStation(Game.selectedStation); 
+        displayStationPanel(Game.selectedStation, Game.stations); 
+        Game.updateStatusPanels(); // Update status after renaming station
+    }
 }
