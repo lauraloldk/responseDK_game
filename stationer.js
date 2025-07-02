@@ -41,15 +41,28 @@ function displayStationPanel(station, allStations) {
 
         <h4>Køretøjer (${station.køretøjer.length})</h4>
         <div class="vehicle-list">
-            ${station.køretøjer.map((vehicle, vIdx) => `
+            ${station.køretøjer.map((vehicle, vIdx) => {
+                // Bestem patrulje-knap tekst og funktion baseret på køretøjets status
+                let patrolButton = '';
+                if (vehicle.status === 'standby') {
+                    patrolButton = `<button onclick="startVehiclePatrolling('${vehicle.id}')" style="background:#4CAF50; color:white; margin-left:5px; padding:4px 8px; font-size:12px; border:none; border-radius:3px; cursor:pointer;" title="Start patrouljering">🚶 Start patrulje</button>`;
+                } else if (vehicle.status === 'patrouillerer') {
+                    patrolButton = `<button onclick="stopVehiclePatrolling('${vehicle.id}')" style="background:#ff6b6b; color:white; margin-left:5px; padding:4px 8px; font-size:12px; border:none; border-radius:3px; cursor:pointer;" title="Stop patrouljering">🛑 Stop patrulje</button>`;
+                } else if (vehicle.status === 'på vej hjem') {
+                    patrolButton = `<button onclick="startVehiclePatrolling('${vehicle.id}')" style="background:#FFA500; color:white; margin-left:5px; padding:4px 8px; font-size:12px; border:none; border-radius:3px; cursor:pointer;" title="Start patrouljering">🚶 Start patrulje</button>`;
+                }
+                
+                return `
                 <div>
                     <span>${vehicle.navn} (${vehicle.type}) - ${vehicle.status}</span>
                     <div class="vehicle-actions">
                         <button onclick="editVehicleInStation(${Game.stations.indexOf(station)}, ${vIdx})">Rediger</button>
                         <button class="danger-button" onclick="deleteVehicleFromStation(${Game.stations.indexOf(station)}, ${vIdx})">Slet</button>
+                        ${patrolButton}
                     </div>
                 </div>
-            `).join('')}
+                `;
+            }).join('')}
         </div>
     `;
     panel.style.display = 'block';
@@ -92,7 +105,14 @@ function addVehicleToStation(station, mapInstance) {
             animationInterval: null, // Reference til alarm-rute animation interval
             homeAnimationInterval: null, // Reference til hjem-rute animation interval
             travelTime: 0, // Tid i bevægelse
-            distanceTraveled: 0 // Tilbagelagt distance
+            distanceTraveled: 0, // Tilbagelagt distance
+            // Nye patrol-relaterede felter
+            patrolling: false, // Om køretøjet patrouillerer
+            patrolDestination: null, // Destination for patrouiljering
+            patrolRouteControl: null, // Routing control for patrouljering
+            animationPaused: false, // Om animationen er pauseret
+            alarm: null, // Reference til aktuel alarm
+            lastDispatchedAlarmId: null // ID på senest udsendte alarm
         };
         
         // Opret markøren for det nye køretøj på kortet
@@ -331,16 +351,29 @@ function displayVehicleSelectionPanel(stations) {
                 <div class="station-group" data-station-name="${station.navn.toLowerCase()}">
                     <h4>${station.navn}</h4>
                     ${station.køretøjer.map((vehicle, vIdx) => {
-                        // Allow selection of vehicles that are standby or returning home
-                        const canDispatch = vehicle.status === 'standby' || vehicle.status === 'på vej hjem';
-                        const statusText = vehicle.status === 'på vej hjem' ? `${vehicle.status} (kan omdirigeres)` : vehicle.status;
+                        // Allow selection of vehicles that are standby, returning home, or patrolling
+                        const canDispatch = vehicle.status === 'standby' || vehicle.status === 'på vej hjem' || vehicle.status === 'patrouillerer';
+                        let statusText = vehicle.status;
+                        if (vehicle.status === 'på vej hjem') {
+                            statusText = `${vehicle.status} (kan omdirigeres)`;
+                        } else if (vehicle.status === 'patrouillerer') {
+                            statusText = `${vehicle.status} (kan omdirigeres)`;
+                        }
                         
                         if (canDispatch) {
-                            const cssClass = vehicle.status === 'på vej hjem' ? 'vehicle-item vehicle-redirectable' : 'vehicle-item';
+                            let cssClass = 'vehicle-item';
+                            if (vehicle.status === 'på vej hjem' || vehicle.status === 'patrouillerer') {
+                                cssClass = 'vehicle-item vehicle-redirectable';
+                            }
                             return `
                                 <label class="${cssClass}" data-vehicle-name="${vehicle.navn.toLowerCase()}" data-vehicle-type="${vehicle.type.toLowerCase()}" data-vehicle-status="${vehicle.status.toLowerCase()}">
                                     <input type="checkbox" onchange="selectVehicleForDispatch(${sIdx}, ${vIdx})" ${Game.selectedVehicles.includes(vehicle) ? 'checked' : ''}>
                                     ${vehicle.navn} (${vehicle.type}) - ${statusText}
+                                    ${vehicle.status === 'patrouillerer' ? `
+                                        <button onclick="stopVehiclePatrolling('${vehicle.id}')" style="margin-left:10px; padding:2px 6px; font-size:11px; background:#ff6b6b; color:white; border:none; border-radius:3px; cursor:pointer;" title="Stop patrouillering">
+                                            🛑
+                                        </button>
+                                    ` : ''}
                                 </label><br>
                             `;
                         } else {
@@ -349,6 +382,8 @@ function displayVehicleSelectionPanel(stations) {
                                     ${vehicle.navn} (${vehicle.type}) - ${vehicle.status} (ikke tilgængelig)
                                 </div><br>
                             `;
+                        }
+                    }).join('')}
                         }
                     }).join('')}
                 </div>

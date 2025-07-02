@@ -61,13 +61,21 @@ function loadGameFromCode(saveCode, Game, mapInstance, updateVehicleMarkerIcon, 
                 type: savedVehicle.type,
                 station: newStation,
                 status: 'standby',
+                position: { lat: newStation.position.lat, lng: newStation.position.lng },
                 alarm: null,
                 marker: null,
                 routeControl: null,
                 animationInterval: null,
                 homeAnimationInterval: null,
                 travelTime: 0,
-                distanceTraveled: 0
+                distanceTraveled: 0,
+                // Nye patrol-relaterede felter
+                patrolling: false,
+                patrolDestination: null,
+                patrolRouteControl: null,
+                animationPaused: false,
+                lastDispatchedAlarmId: null,
+                targetPosition: null
             };
             vehicle.marker = createVehicleMarker(vehicle.station.position, vehicle.navn, vehicle.type, vehicle);
             updateVehicleMarkerIcon(vehicle);

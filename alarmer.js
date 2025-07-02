@@ -72,10 +72,16 @@ function sendVehiclesToAlarm(
         if (!vehicle.marker) return;
 
         // VIGTIGT: Stop alle eksisterende animationer/ruter for dette køretøj
-        // Dette er nødvendigt for redirection fra "på vej hjem" status
+        // Dette er nødvendigt for redirection fra "på vej hjem" status og patrouillering
         if (vehicle.routeControl) { 
             mapInstance.removeControl(vehicle.routeControl);
             vehicle.routeControl = null; 
+        }
+        
+        // Stop patrouillering route control
+        if (vehicle.patrolRouteControl) {
+            mapInstance.removeControl(vehicle.patrolRouteControl);
+            vehicle.patrolRouteControl = null;
         }
         
         // Stop enhver aktiv animation interval hvis køretøjet er i bevægelse
@@ -88,6 +94,12 @@ function sendVehiclesToAlarm(
         if (vehicle.homeAnimationInterval) {
             clearInterval(vehicle.homeAnimationInterval);
             vehicle.homeAnimationInterval = null;
+        }
+        
+        // Stop patrouillering hvis køretøjet patrouillerer
+        if (vehicle.patrolling) {
+            vehicle.patrolling = false;
+            vehicle.patrolDestination = null;
         }
 
         vehicle.status = "undervejs";
@@ -383,6 +395,493 @@ function resolveAlarmManually(alarmToResolve) {
 }
 
 /**
+ * Starter patrouillering for et køretøj
+ * @param {string} vehicleId - ID på køretøjet der skal patrouillere
+ */
+function startPatrolling(vehicleId) {
+    const vehicle = findVehicleById(vehicleId);
+    if (!vehicle) {
+        console.log('Køretøj ikke fundet');
+        return;
+    }
+    
+    // Tjek om køretøjet kan patrouillere (standby eller på vej hjem)
+    if (vehicle.status !== 'standby' && vehicle.status !== 'på vej hjem') {
+        console.log(`Køretøj kan ikke patrouillere - status: ${vehicle.status}`);
+        return;
+    }
+    
+    // Stop eventuelle eksisterende animationer først
+    stopVehicleMovement(vehicle);
+    
+    // Nulstil alarm-relaterede felter hvis køretøjet var på vej hjem fra alarm
+    if (vehicle.alarm) {
+        vehicle.alarm = null;
+        vehicle.lastDispatchedAlarmId = null;
+    }
+    
+    vehicle.status = 'patrouillerer';
+    vehicle.patrolling = true;
+    vehicle.patrolDestination = null;
+    vehicle.animationPaused = false; // Reset pause flag
+    
+    // Opdater køretøjsikon
+    updateVehicleMarkerIcon(vehicle);
+    
+    // Opdater popup hvis den er åben
+    if (typeof updateVehicleMenuIfOpen === 'function') {
+        updateVehicleMenuIfOpen(vehicle);
+    }
+    
+    // Start patrouillering
+    moveToRandomPatrolPoint(vehicle);
+    
+    // Opdater UI
+    Game.updateStatusPanels();
+    
+    console.log(`${vehicle.navn} starter patrouljering i 50 km radius omkring ${vehicle.station.navn}`);
+}
+
+/**
+ * Stopper patrouillering for et køretøj
+ * @param {string} vehicleId - ID på køretøjet der skal stoppe patrouillering
+ */
+function stopPatrolling(vehicleId) {
+    const vehicle = findVehicleById(vehicleId);
+    if (!vehicle || vehicle.status !== 'patrouillerer') {
+        console.log('Køretøj patrouillerer ikke');
+        return;
+    }
+    
+    vehicle.status = 'standby';
+    vehicle.patrolling = false;
+    vehicle.patrolDestination = null;
+    
+    // Stop alle bevægelser
+    stopVehicleMovement(vehicle);
+    
+    // Flyt køretøjet tilbage til stationen
+    if (vehicle.marker) {
+        vehicle.marker.setLatLng(vehicle.station.position);
+    }
+    
+    // Opdater køretøjsikon
+    updateVehicleMarkerIcon(vehicle);
+    
+    // Opdater popup hvis den er åben
+    if (typeof updateVehicleMenuIfOpen === 'function') {
+        updateVehicleMenuIfOpen(vehicle);
+    }
+    
+    // Opdater UI
+    Game.updateStatusPanels();
+    
+    console.log(`${vehicle.navn} stopper patrouillering og vender tilbage til ${vehicle.station.navn}`);
+}
+
+/**
+ * Flytter et køretøj til et tilfældigt punkt inden for patrouljeringsområdet
+ * @param {Object} vehicle - Køretøjsobjektet
+ */
+function moveToRandomPatrolPoint(vehicle) {
+    if (!vehicle.patrolling || vehicle.status !== 'patrouillerer' || vehicle.animationPaused) {
+        return;
+    }
+    
+    const station = vehicle.station;
+    const radiusKm = 50; // Fast 50 km radius for patrouljering
+    
+    // Generer tilfældig position inden for radius
+    let lat, lng, dist;
+    do {
+        lat = station.position.lat + (Math.random() - 0.5) * (radiusKm / 111.32);
+        lng = station.position.lng + (Math.random() - 0.5) * (radiusKm / (111.32 * Math.cos(station.position.lat * Math.PI / 180)));
+        dist = distanceKm(station.position.lat, station.position.lng, lat, lng);
+    } while (dist > radiusKm);
+    
+    const destination = { lat, lng };
+    vehicle.patrolDestination = destination;
+    
+    // Animér bevægelse til destinationen
+    animateVehicleToDestination(vehicle, destination, () => {
+        // Når køretøjet når destinationen, vent lidt og vælg så et nyt punkt
+        if (vehicle.patrolling && vehicle.status === 'patrouillerer' && !vehicle.animationPaused) {
+            setTimeout(() => {
+                if (!vehicle.animationPaused) {
+                    moveToRandomPatrolPoint(vehicle);
+                }
+            }, 3000 + Math.random() * 7000); // Vent 3-10 sekunder
+        }
+    });
+}
+
+/**
+ * Animerer et køretøj til en destination ved at følge vejene
+ * @param {Object} vehicle - Køretøjsobjektet
+ * @param {Object} destination - Destinationskoordinater {lat, lng}
+ * @param {Function} callback - Callback funktion når destinationen er nået
+ */
+function animateVehicleToDestination(vehicle, destination, callback) {
+    if (!vehicle.marker) return;
+    
+    const startPos = vehicle.marker.getLatLng();
+    const endPos = L.latLng(destination.lat, destination.lng);
+    
+    // Stop eksisterende routing control
+    if (vehicle.patrolRouteControl) {
+        Game.map.removeControl(vehicle.patrolRouteControl);
+        vehicle.patrolRouteControl = null;
+    }
+    
+    // Opret en routing control for patrouillering
+    vehicle.patrolRouteControl = L.Routing.control({
+        waypoints: [startPos, endPos],
+        routeWhileDragging: false,
+        addWaypoints: false,
+        createMarker: function() { return null; }, // Skjul rutemarkører
+        lineOptions: {
+            styles: [] // Ingen visuelle linjer for patrouljeringsruten
+        },
+        show: false, // Skjul instruktioner
+        draggableWaypoints: false,
+        fitSelectedRoutes: false
+    }).on('routesfound', function(e) {
+        const routes = e.routes;
+        const route = routes[0];
+        
+        if (route && route.coordinates) {
+            // Start animation langs ruten
+            animateAlongRoute(vehicle, route.coordinates, callback);
+        } else if (callback) {
+            callback();
+        }
+    }).on('routingerror', function(e) {
+        console.log('Routing fejl under patrouillering:', e);
+        // Fallback til direkte linje hvis routing fejler
+        animateDirectLine(vehicle, destination, callback);
+    });
+    
+    // Gem nuværende zoom og center for at forhindre auto-zoom
+    const currentZoom = Game.map.getZoom();
+    const currentCenter = Game.map.getCenter();
+    
+    // Tilføj til kortet og start routing
+    vehicle.patrolRouteControl.addTo(Game.map);
+    
+    // Gendan zoom og center efter routing er tilføjet
+    setTimeout(() => {
+        Game.map.setView(currentCenter, currentZoom);
+    }, 100);
+}
+
+/**
+ * Animerer køretøj langs en rute
+ * @param {Object} vehicle - Køretøjsobjektet
+ * @param {Array} coordinates - Array af koordinater langs ruten
+ * @param {Function} callback - Callback funktion når destinationen er nået
+ */
+function animateAlongRoute(vehicle, coordinates, callback) {
+    if (!vehicle.marker || !coordinates || coordinates.length === 0) {
+        if (callback) callback();
+        return;
+    }
+    
+    let currentIndex = 0;
+    const totalPoints = coordinates.length;
+    const animationSpeed = 500; // ms mellem hver opdatering - hurtigere men stadig langsom
+    const stepSize = 1; // Spring kun 1 koordinat ad gangen for jævn bevægelse
+    
+    // Stop eksisterende animation
+    if (vehicle.animationInterval) {
+        clearInterval(vehicle.animationInterval);
+    }
+    
+    vehicle.animationInterval = setInterval(() => {
+        if (currentIndex >= totalPoints || !vehicle.patrolling || vehicle.status !== 'patrouillerer') {
+            clearInterval(vehicle.animationInterval);
+            vehicle.animationInterval = null;
+            
+            // Fjern rutelinjen når animationen er færdig
+            if (vehicle.patrolRouteControl) {
+                Game.map.removeControl(vehicle.patrolRouteControl);
+                vehicle.patrolRouteControl = null;
+            }
+            
+            if (callback) callback();
+            return;
+        }
+        
+        const coord = coordinates[currentIndex];
+        vehicle.marker.setLatLng([coord.lat, coord.lng]);
+        currentIndex += stepSize; // Spring kun 1 koordinat for jævn bevægelse
+    }, animationSpeed);
+}
+
+/**
+ * Fallback animation med direkte linje (bruges hvis routing fejler)
+ * @param {Object} vehicle - Køretøjsobjektet
+ * @param {Object} destination - Destinationskoordinater {lat, lng}
+ * @param {Function} callback - Callback funktion når destinationen er nået
+ */
+function animateDirectLine(vehicle, destination, callback) {
+    if (!vehicle.marker) return;
+    
+    const startPos = vehicle.marker.getLatLng();
+    const endPos = L.latLng(destination.lat, destination.lng);
+    
+    const totalDistance = startPos.distanceTo(endPos); // Distance i meter
+    const duration = Math.max(5000, totalDistance * 0.1); // Minimum 5 sekunder, ellers baseret på distance
+    const startTime = Date.now();
+    
+    // Stop eksisterende animation
+    if (vehicle.animationInterval) {
+        clearInterval(vehicle.animationInterval);
+    }
+    
+    vehicle.animationInterval = setInterval(() => {
+        const elapsed = Date.now() - startTime;
+        const progress = Math.min(elapsed / duration, 1);
+        
+        // Interpolér position
+        const currentLat = startPos.lat + (endPos.lat - startPos.lat) * progress;
+        const currentLng = startPos.lng + (endPos.lng - startPos.lng) * progress;
+        
+        vehicle.marker.setLatLng([currentLat, currentLng]);
+        
+        if (progress >= 1) {
+            clearInterval(vehicle.animationInterval);
+            vehicle.animationInterval = null;
+            if (callback) callback();
+        }
+    }, 100); // Opdater hver 100ms
+}
+
+/**
+ * Stopper alle bevægelser for et køretøj
+ * @param {Object} vehicle - Køretøjsobjektet
+ */
+function stopVehicleMovement(vehicle) {
+    if (vehicle.animationInterval) {
+        clearInterval(vehicle.animationInterval);
+        vehicle.animationInterval = null;
+    }
+    
+    if (vehicle.homeAnimationInterval) {
+        clearInterval(vehicle.homeAnimationInterval);
+        vehicle.homeAnimationInterval = null;
+    }
+    
+    if (vehicle.routeControl && Game.map) {
+        Game.map.removeControl(vehicle.routeControl);
+        vehicle.routeControl = null;
+    }
+    
+    // Stop patrouillering route control
+    if (vehicle.patrolRouteControl && Game.map) {
+        Game.map.removeControl(vehicle.patrolRouteControl);
+        vehicle.patrolRouteControl = null;
+    }
+}
+
+/**
+ * Finder et køretøj baseret på ID
+ * @param {string} vehicleId - ID på køretøjet
+ * @returns {Object|null} - Køretøjsobjektet eller null hvis ikke fundet
+ */
+function findVehicleById(vehicleId) {
+    for (const station of Game.stations) {
+        for (const vehicle of station.køretøjer) {
+            if (vehicle.id === vehicleId) {
+                return vehicle;
+            }
+        }
+    }
+    return null;
+}
+
+/**
+ * Sender et køretøj hjem til sin station (stopper alarm/patrouillering)
+ * @param {string} vehicleId - ID på køretøjet der skal sendes hjem
+ */
+function sendVehicleHome(vehicleId) {
+    const vehicle = findVehicleById(vehicleId);
+    if (!vehicle) {
+        console.log('Køretøj ikke fundet');
+        return;
+    }
+    
+    // Stop alle bevægelser og animationer
+    stopVehicleMovement(vehicle);
+    
+    // Stop patrouillering hvis køretøjet patrouillerer
+    if (vehicle.patrolling) {
+        vehicle.patrolling = false;
+        vehicle.patrolDestination = null;
+        vehicle.animationPaused = false; // Reset pause flag
+    }
+    
+    // Fjern alarm reference hvis køretøjet var på vej til alarm
+    if (vehicle.alarm) {
+        vehicle.alarm = null;
+        vehicle.lastDispatchedAlarmId = null;
+    }
+    
+    // Sæt status til "på vej hjem" og start rute-animation
+    vehicle.status = 'på vej hjem';
+    
+    // Opdater køretøjsikon først
+    updateVehicleMarkerIcon(vehicle);
+    
+    // Start animation hjem med rutefølgning
+    animateVehicleHome(vehicle);
+    
+    // Opdater popup hvis den er åben
+    if (typeof updateVehicleMenuIfOpen === 'function') {
+        updateVehicleMenuIfOpen(vehicle);
+    }
+    
+    // Opdater UI
+    Game.updateStatusPanels();
+    
+    console.log(`${vehicle.navn} kører hjem til ${vehicle.station.navn}`);
+}
+
+/**
+ * Animerer et køretøj hjem til sin station ved at følge vejene
+ * @param {Object} vehicle - Køretøjsobjektet der skal køre hjem
+ */
+function animateVehicleHome(vehicle) {
+    if (!vehicle.marker) return;
+    
+    const currentPos = vehicle.marker.getLatLng();
+    const homePos = vehicle.station.position;
+    
+    // Tjek om køretøjet er en helikopter
+    if (isHelicopter(vehicle)) {
+        // Helikoptere flyver direkte hjem
+        vehicle.homeAnimationInterval = animateHelicopterDirectLine(
+            vehicle,
+            currentPos,
+            homePos,
+            Game.REFRESH_INTERVAL_MS,
+            Game.STANDARD_TRAVEL_TIME_SECONDS,
+            () => {
+                // Callback når helikopteren er hjemme
+                vehicle.status = 'standby';
+                updateVehicleMarkerIcon(vehicle);
+                vehicle.marker.setLatLng(vehicle.station.position);
+                console.log(`${vehicle.navn} er ankommet hjem til ${vehicle.station.navn}`);
+            }
+        );
+    } else {
+        // Normale køretøjer følger vejene hjem
+        const homeRouteControl = L.Routing.control({
+            waypoints: [currentPos, L.latLng(homePos.lat, homePos.lng)],
+            routeWhileDragging: false,
+            addWaypoints: false,
+            draggableWaypoints: false,
+            createMarker: () => null, // Ingen markører
+            lineOptions: { styles: [] }, // Ingen synlige linjer
+            show: false, // Skjul instruktioner
+            fitSelectedRoutes: false // Forhindrer auto-zoom
+        });
+        
+        vehicle.routeControl = homeRouteControl;
+        
+        // Gem nuværende zoom og center for at forhindre auto-zoom
+        const currentZoom = Game.map.getZoom();
+        const currentCenter = Game.map.getCenter();
+        
+        homeRouteControl.on('routesfound', function(e) {
+            const routes = e.routes;
+            const route = routes[0];
+            
+            if (route && route.coordinates) {
+                // Animér langs ruten hjem
+                animateVehicleAlongRoute(vehicle, route.coordinates, () => {
+                    // Callback når køretøjet er hjemme
+                    vehicle.status = 'standby';
+                    updateVehicleMarkerIcon(vehicle);
+                    vehicle.marker.setLatLng(vehicle.station.position);
+                    
+                    // Fjern route control
+                    if (vehicle.routeControl) {
+                        Game.map.removeControl(vehicle.routeControl);
+                        vehicle.routeControl = null;
+                    }
+                    
+                    console.log(`${vehicle.navn} er ankommet hjem til ${vehicle.station.navn}`);
+                });
+            } else {
+                // Fallback til direkte flytning hvis routing fejler
+                vehicle.status = 'standby';
+                vehicle.marker.setLatLng(vehicle.station.position);
+                updateVehicleMarkerIcon(vehicle);
+                console.log(`${vehicle.navn} er hjemme (routing fejlede)`);
+            }
+        });
+        
+        homeRouteControl.on('routingerror', function(e) {
+            console.log('Routing fejl ved hjemkørsel:', e);
+            // Fallback til direkte flytning
+            vehicle.status = 'standby';
+            vehicle.marker.setLatLng(vehicle.station.position);
+            updateVehicleMarkerIcon(vehicle);
+            
+            if (vehicle.routeControl) {
+                Game.map.removeControl(vehicle.routeControl);
+                vehicle.routeControl = null;
+            }
+        });
+        
+        // Tilføj til kortet
+        homeRouteControl.addTo(Game.map);
+        
+        // Gendan zoom og center efter routing er tilføjet
+        setTimeout(() => {
+            Game.map.setView(currentCenter, currentZoom);
+        }, 100);
+    }
+}
+
+/**
+ * Animerer køretøj langs en rute hjem
+ * @param {Object} vehicle - Køretøjsobjektet
+ * @param {Array} coordinates - Array af koordinater langs ruten
+ * @param {Function} callback - Callback funktion når destinationen er nået
+ */
+function animateVehicleAlongRoute(vehicle, coordinates, callback) {
+    if (!vehicle.marker || !coordinates || coordinates.length === 0) {
+        if (callback) callback();
+        return;
+    }
+    
+    let currentIndex = 0;
+    const totalPoints = coordinates.length;
+    const animationSpeed = 200; // Normal hastighed for hjemkørsel (hurtigere end patrouillering)
+    const stepSize = 2; // Færre koordinater springes over for jævnere bevægelse
+    
+    // Stop eksisterende animation
+    if (vehicle.homeAnimationInterval) {
+        clearInterval(vehicle.homeAnimationInterval);
+    }
+    
+    vehicle.homeAnimationInterval = setInterval(() => {
+        if (currentIndex >= totalPoints || vehicle.status !== 'på vej hjem') {
+            clearInterval(vehicle.homeAnimationInterval);
+            vehicle.homeAnimationInterval = null;
+            
+            if (callback) callback();
+            return;
+        }
+        
+        const coord = coordinates[currentIndex];
+        vehicle.marker.setLatLng([coord.lat, coord.lng]);
+        currentIndex += stepSize;
+    }, animationSpeed);
+}
+
+/**
  * Beregner afstanden mellem to geografiske punkter i kilometer.
  * @param {number} lat1 - Breddegrad for punkt 1.
  * @param {number} lon1 - Længdegrad for punkt 1.
@@ -451,7 +950,6 @@ function animateHelicopterDirectLine(vehicle, startPos, endPos, refreshInterval,
 
 /**
  * Hjælpefunktion til at formatere totalt antal sekunder til 'MM:SS' format.
- * (Denne funktion skal være tilgængelig globalt eller i en utils.js fil)
  * @param {number} totalSeconds - Det samlede antal sekunder.
  * @returns {string} Formatteret tid i MM:SS format.
  */
@@ -464,8 +962,4 @@ function formatTime(totalSeconds) {
 // Bemærk:
 // - createAlarmMarker(latlng, id, type, alarmObject)
 // - updateVehicleMarkerIcon(vehicle)
-// - getRandomAlarmType() // Bruges i createAlarm, men den hardcoded liste her betyder den ikke nødvendigvis er nødvendig
-// - getRandomLocationNearStations(stations, radius) // Kan erstattes af logikken i createAlarm
-
-// Disse funktioner skal enten inkluderes direkte i denne fil, 
-// eller være tilgængelige fra andre script-filer, der er indlæst før denne.
+// Disse funktioner skal være tilgængelige fra andre script-filer, der er indlæst før denne.

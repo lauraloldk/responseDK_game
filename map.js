@@ -71,17 +71,25 @@ function createVehicleMarker(position, name, type, vehicleObject) {
         vehicleSymbol = '🚛'; // Flatbed/tow truck ikon
     }
 
+    // Bestem click-område baseret på status
+    let clickableSize = [70, 45];
+    let clickableClass = 'vehicle-ikon';
+    if (vehicleObject.status === 'patrouillerer' || vehicleObject.status === 'undervejs') {
+        clickableSize = [90, 60]; // Større clickable område
+        clickableClass = 'moving-vehicle';
+    }
+
     // Opretter ikonet dynamisk, så navnet kan inkluderes direkte i HTML'en
     const dynamicVehicleIcon = L.divIcon({
-        className: 'vehicle-ikon',
+        className: clickableClass,
         html: `
-            <div style='text-align:center;'>
+            <div style='text-align:center; position: relative;'>
                 <div style='width:12px;height:12px;background:${iconColor};border:2px solid #444;margin:auto;border-radius:4px;'></div>
                 <div style='font-size:12px;margin-top:-2px;'>${vehicleSymbol}</div>
                 <div style='font-size:10px;background:white;color:black;padding:2px 6px;border-radius:4px;margin-top:2px;width:60px;white-space: nowrap; overflow: hidden; text-overflow: ellipsis;'>${name}</div>
-            </div>`, // Inkluder navnet direkte i ikonet
-        iconSize: [70, 45], // Lidt højere for at give plads til helikopter-ikonet
-        iconAnchor: [35, 22], // Juster anker
+            </div>`,
+        iconSize: clickableSize,
+        iconAnchor: [clickableSize[0]/2, clickableSize[1]/2],
         popupAnchor: [0, -7]
     });
 
@@ -90,11 +98,13 @@ function createVehicleMarker(position, name, type, vehicleObject) {
     // Link the marker back to the vehicle object for easy lookup (good for popups/interactions)
     marker.vehicleObject = vehicleObject;
 
-    // Tilføj en click-event til køretøjsmarkøren for at åbne stationens panel
-    marker.on('click', () => {
-        if (vehicleObject.station) { // Sørg for at køretøjet er tilknyttet en station
-            showStationDetails(vehicleObject.station);
+    // Tilføj enkel click-event til køretøjsmarkøren
+    marker.on('click', function(e) {
+        // Hvis køretøjet patrouillerer og bevægelsen er pauseret, genoptag ikke automatisk
+        if (vehicleObject.animationPaused) {
+            vehicleObject.animationPaused = false; // Permanent stop af auto-genoptagelse
         }
+        showVehicleMenu(vehicleObject);
     });
     
     allMarkers.push(marker); // Keep track of this marker
@@ -111,6 +121,8 @@ function updateVehicleMarkerIcon(vehicle) {
         iconColor = 'red';
     } else if (vehicle.status === 'på vej hjem') {
         iconColor = 'yellow';
+    } else if (vehicle.status === 'patrouillerer') {
+        iconColor = 'orange';
     }
 
     // Bestem køretøjsikon baseret på type
@@ -127,21 +139,42 @@ function updateVehicleMarkerIcon(vehicle) {
         vehicleSymbol = '🚛'; // Flatbed/tow truck ikon
     }
 
+    // Bestem click-område baseret på status
+    let clickableSize = [70, 45];
+    let clickableClass = 'vehicle-ikon';
+    if (vehicle.status === 'patrouillerer' || vehicle.status === 'undervejs') {
+        clickableSize = [90, 60]; // Større clickable område
+        clickableClass = 'moving-vehicle';
+    }
+
     // Opretter et nyt L.divIcon for at opdatere markøren
     const newIcon = L.divIcon({
-        className: 'vehicle-ikon',
+        className: clickableClass,
         html: `
-            <div style='text-align:center;'>
+            <div style='text-align:center; position: relative;'>
                 <div style='width:12px;height:12px;background:${iconColor};border:2px solid #444;margin:auto;border-radius:4px;'></div>
                 <div style='font-size:12px;margin-top:-2px;'>${vehicleSymbol}</div>
                 <div style='font-size:10px;background:white;color:black;padding:2px 6px;border-radius:4px;margin-top:2px;width:60px;white-space: nowrap; overflow: hidden; text-overflow: ellipsis;'>${vehicle.navn}</div>
-            </div>`, // Brug vehicle.navn her
-        iconSize: [70, 45], // Lidt højere for at give plads til helikopter-ikonet
-        iconAnchor: [35, 22], // Justeret anker
+            </div>`,
+        iconSize: clickableSize,
+        iconAnchor: [clickableSize[0]/2, clickableSize[1]/2],
         popupAnchor: [0, -7]
     });
     vehicle.marker.setIcon(newIcon);
-    // Ingen setPopupContent her, da vi ikke ønsker en popup på køretøjer
+
+    // Fjern alle eksisterende event listeners først
+    vehicle.marker.off('click');
+    vehicle.marker.off('mousedown');
+    vehicle.marker.off('mouseup');
+    
+    // Tilføj ny enkel event listener
+    vehicle.marker.on('click', function(e) {
+        // Hvis køretøjet patrouillerer og bevægelsen er pauseret, genoptag ikke automatisk
+        if (vehicle.animationPaused) {
+            vehicle.animationPaused = false; // Permanent stop af auto-genoptagelse
+        }
+        showVehicleMenu(vehicle);
+    });
 }
 
 function updateStationMarkerIcon(station) {
@@ -221,4 +254,56 @@ function clearAllMapElements(mapInstance) {
         }
     });
     allRouteControls = []; // Reset the array
+}
+
+// Funktion til at vise køretøjsmenu med popup
+function showVehicleMenu(vehicle) {
+    if (!vehicle.marker) return;
+    
+    // Hvis køretøjet patrouillerer og bevægelsen er pauseret, genoptag ikke automatisk
+    if (vehicle.animationPaused) {
+        vehicle.animationPaused = false; // Permanent stop af auto-genoptagelse
+    }
+    
+    let menuHTML = `<b>${vehicle.navn}</b><br>`;
+    menuHTML += `Type: ${vehicle.type}<br>`;
+    menuHTML += `Status: ${vehicle.status}<br>`;
+    menuHTML += `Station: ${vehicle.station.navn}<br><br>`;
+    
+    // Vis forskellige knapper baseret på køretøjets status
+    if (vehicle.status === 'standby') {
+        menuHTML += `<button onclick="startVehiclePatrolling('${vehicle.id}')">🚶 Patruljer</button><br>`;
+    } else if (vehicle.status === 'patrouillerer') {
+        menuHTML += `<button onclick="stopVehiclePatrolling('${vehicle.id}')">🛑 Stop patrouillering</button><br>`;
+        menuHTML += `<button onclick="sendVehicleToHome('${vehicle.id}')">🏠 Send hjem til station</button><br>`;
+    } else if (vehicle.status === 'undervejs') {
+        menuHTML += `<button onclick="sendVehicleToHome('${vehicle.id}')">🏠 Send hjem til station</button><br>`;
+    } else if (vehicle.status === 'på vej hjem') {
+        menuHTML += `<button onclick="startVehiclePatrolling('${vehicle.id}')">🚶 Start patrouljering</button><br>`;
+        menuHTML += `<button onclick="sendVehicleToHome('${vehicle.id}')">🏠 Fortsæt hjem til station</button><br>`;
+    }
+    
+    menuHTML += `<button onclick="showStationDetails(Game.stations.find(s => s.id === '${vehicle.station.id}'))">🏢 Vis station</button>`;
+    
+    vehicle.marker.bindPopup(menuHTML).openPopup();
+    
+    // Håndter popup lukning
+    vehicle.marker.once('popupclose', () => {
+        // Hvis køretøjet stadig patrouillerer og var pauseret, genoptag
+        if (vehicle.status === 'patrouillerer' && vehicle.animationPaused) {
+            setTimeout(() => {
+                if (vehicle.status === 'patrouillerer') {
+                    moveToRandomPatrolPoint(vehicle);
+                    vehicle.animationPaused = false;
+                }
+            }, 1000); // Kort pause før genoptagelse
+        }
+    });
+}
+
+// Funktion til at opdatere køretøjsmenu hvis popup'en er åben
+function updateVehicleMenuIfOpen(vehicle) {
+    if (vehicle.marker && vehicle.marker.isPopupOpen()) {
+        showVehicleMenu(vehicle);
+    }
 }
