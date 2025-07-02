@@ -1,6 +1,148 @@
 // alarmer.js
 let nextAlarmId = 1; // Denne tæller skal kun tælle opad.
 
+// Cache for vand-lokationer for at reducere API-kald
+const waterLocationCache = new Map();
+
+/**
+ * Simpel heuristik til at bestemme om koordinater sandsynligvis er på vand
+ * Baseret på danske geografiske karakteristika
+ * @param {number} lat - Latitude
+ * @param {number} lng - Longitude
+ * @returns {boolean} - True hvis sandsynligvis vand
+ */
+function isLikelyWaterLocation(lat, lng) {
+    // Danmark er omgivet af vand, så punkter uden for hovedland er ofte vand
+    const danmarkMainland = {
+        minLat: 54.8, maxLat: 57.1,
+        minLng: 9.5, maxLng: 12.7
+    };
+    
+    // Hvis uden for hovedland Danmark, højere chance for vand
+    if (lat < danmarkMainland.minLat || lat > danmarkMainland.maxLat || 
+        lng < danmarkMainland.minLng || lng > danmarkMainland.maxLng) {
+        return Math.random() > 0.4; // 60% chance for vand
+    }
+    
+    // Indre Danmark, lavere chance for vand
+    return Math.random() > 0.8; // 20% chance for vand
+}
+
+/**
+ * Tjekker om et sæt koordinater er på vand ved hjælp af en ekstern service
+ * @param {number} lat - Latitude
+ * @param {number} lng - Longitude
+ * @returns {Promise<boolean>} - True hvis lokationen er på vand, false hvis på land
+ */
+async function isLocationOnWater(lat, lng) {
+    // Først, tjek cachen
+    const cacheKey = `${lat.toFixed(4)},${lng.toFixed(4)}`;
+    if (waterLocationCache.has(cacheKey)) {
+        return waterLocationCache.get(cacheKey);
+    }
+    
+    try {
+        // Tilføj en lille delay for at respektere API rate limits
+        await new Promise(resolve => setTimeout(resolve, 200));
+        
+        // Bruger OpenStreetMap Nominatim til reverse geocoding
+        const response = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&zoom=18&addressdetails=1&extratags=1`);
+        const data = await response.json();
+        
+        // Først: Tjek error eller manglende data
+        if (data.error || !data.display_name) {
+            // Hvis der ikke er data, kan det betyde vand (især i havet)
+            const isWater = Math.random() > 0.5; // 50% chance for vand hvis uklart
+            // Gem resultatet i cache med kortvarig udløb
+            waterLocationCache.set(cacheKey, isWater);
+            setTimeout(() => waterLocationCache.delete(cacheKey), 1000 * 60 * 5); // Udløb efter 5 minutter
+            return isWater;
+        }
+        
+        // Tjek place_type eller class først (mest pålidelig)
+        if (data.class === 'natural') {
+            const waterTypes = ['water', 'bay', 'coastline', 'beach', 'reef', 'strait', 'fjord'];
+            if (waterTypes.includes(data.type)) {
+                return true;
+            }
+        }
+        
+        if (data.class === 'waterway') {
+            return true; // Floder, kanaler, etc.
+        }
+        
+        // Tjek display_name for vand-indikatorer
+        if (data.display_name) {
+            const displayName = data.display_name.toLowerCase();
+            const waterKeywords = [
+                'ocean', 'sea', 'lake', 'river', 'bay', 'strait', 'sound', 'fjord', 'pond', 'reservoir',
+                'hav', 'sø', 'å', 'bugt', 'fjord', 'sund', 'vand', 'water', 'kanal', 'canal',
+                'øresund', 'kattegat', 'skagerrak', 'bælt', 'belt', 'marina', 'havn', 'harbor', 'port'
+            ];
+            
+            if (waterKeywords.some(keyword => displayName.includes(keyword))) {
+                return true;
+            }
+        }
+        
+        // Tjek extraTags for vand-indikatorer
+        if (data.extratags) {
+            if (data.extratags.water || data.extratags.waterway || data.extratags.natural === 'water') {
+                return true;
+            }
+        }
+        
+        // Hvis der ikke er adresse-komponenter, kan det indikere vand
+        if (!data.address || Object.keys(data.address).length <= 1) {
+            // Men kun hvis vi er i en kyst-region (Danmark)
+            if (lat >= 54.5 && lat <= 57.8 && lng >= 8.0 && lng <= 15.2) {
+                const isWater = Math.random() > 0.3; // 70% chance for vand i danske farvande uden adresse
+                // Gem resultatet i cache med kortvarig udløb
+                waterLocationCache.set(cacheKey, isWater);
+                setTimeout(() => waterLocationCache.delete(cacheKey), 1000 * 60 * 5); // Udløb efter 5 minutter
+                return isWater;
+            }
+        }
+        
+        return false;
+    } catch (error) {
+        console.log('Fejl ved kontrol af vand-lokation:', error);
+        // Hvis API'et fejler, gæt baseret på geografisk lokation
+        // I Danmark er der mange vand-områder, så hvis koordinaterne er uden for normale land-koordinater
+        if (lat >= 54.5 && lat <= 57.8 && lng >= 8.0 && lng <= 15.2) {
+            const isWater = Math.random() > 0.7; // 30% chance for vand hvis API fejler i Danmark
+            // Gem resultatet i cache med kortvarig udløb
+            waterLocationCache.set(cacheKey, isWater);
+            setTimeout(() => waterLocationCache.delete(cacheKey), 1000 * 60 * 5); // Udløb efter 5 minutter
+            return isWater;
+        }
+        return false;
+    }
+}
+
+/**
+ * Ekstraherer spawn-regel fra alarm-teksten
+ * @param {string} alarmText - Teksten for alarmen
+ * @returns {string} - 'only-water', 'can-spawn-on-water', eller 'land-only' (standard)
+ */
+function getSpawnRule(alarmText) {
+    if (alarmText.includes('#only-on-water#')) {
+        return 'only-water';
+    } else if (alarmText.includes('#can-spawn-on-water#')) {
+        return 'can-spawn-on-water';
+    }
+    return 'land-only';
+}
+
+/**
+ * Renser alarm-teksten for spawn-regel tags
+ * @param {string} alarmText - Den originale alarm-tekst
+ * @returns {string} - Alarm-tekst uden tags
+ */
+function cleanAlarmText(alarmText) {
+    return alarmText.replace(/#only-on-water#/g, '').replace(/#can-spawn-on-water#/g, '').trim();
+}
+
 /**
  * Opretter en ny alarm på kortet.
  * @param {Array<Object>} stations - Array af alle stationer.
@@ -8,27 +150,86 @@ let nextAlarmId = 1; // Denne tæller skal kun tælle opad.
  * @param {HTMLAudioElement} alarmSound - Lyden der skal afspilles ved ny alarm.
  * @param {number} spawnRadiusKm - Radius i km omkring en station, hvor alarmen kan opstå.
  */
-function createAlarm(stations, alarmsArray, alarmSound, spawnRadiusKm) { 
+async function createAlarm(stations, alarmsArray, alarmSound, spawnRadiusKm) { 
     if (stations.length === 0) return;
 
     const randomStationIndex = Math.floor(Math.random() * stations.length);
     const station = stations[randomStationIndex];
 
+    let selectedAlarmType = null;
     let lat, lng, dist;
-    // Sikrer at alarmen spawnes inden for den specificerede radius
-    do {
-        lat = station.position.lat + (Math.random() - 0.5) * (spawnRadiusKm / 111.32); // Ca. grader pr. KM
-        lng = station.position.lng + (Math.random() - 0.5) * (spawnRadiusKm / (111.32 * Math.cos(station.position.lat * Math.PI / 180)));
-        dist = distanceKm(station.position.lat, station.position.lng, lat, lng);
-    } while (dist > spawnRadiusKm);
+    let maxAttempts = 20;
+    let alarmAttempts = 0;
 
-    const type = alarmTypes[Math.floor(Math.random() * alarmTypes.length)];
+    // Først vælg en alarm-type, derefter find en passende lokation
+    while (alarmAttempts < 5) { // Max 5 alarm-forsøg
+        selectedAlarmType = alarmTypes[Math.floor(Math.random() * alarmTypes.length)];
+        const spawnRule = getSpawnRule(selectedAlarmType);
+        
+        console.log(`Forsøger alarm: "${selectedAlarmType}" med regel: ${spawnRule}`);
+        
+        let locationAttempts = 0;
+        let validLocation = false;
+        
+        // Find en lokation der overholder alarm-reglen
+        while (locationAttempts < maxAttempts && !validLocation) {
+            // Generér tilfældig lokation inden for radius
+            lat = station.position.lat + (Math.random() - 0.5) * (spawnRadiusKm / 111.32);
+            lng = station.position.lng + (Math.random() - 0.5) * (spawnRadiusKm / (111.32 * Math.cos(station.position.lat * Math.PI / 180)));
+            dist = distanceKm(station.position.lat, station.position.lng, lat, lng);
+            
+            if (dist <= spawnRadiusKm) {
+                // Tjek om lokationen overholder spawn-reglen
+                const isOnWater = await isLocationOnWater(lat, lng);
+                
+                console.log(`Lokation ${lat.toFixed(4)}, ${lng.toFixed(4)} - på vand: ${isOnWater}, regel: ${spawnRule}`);
+                
+                if (spawnRule === 'only-water' && isOnWater) {
+                    validLocation = true;
+                    console.log('✓ Valid vand-lokation fundet');
+                } else if (spawnRule === 'can-spawn-on-water') {
+                    validLocation = true; // Kan spawne både på land og vand
+                    console.log('✓ Fleksibel lokation accepteret');
+                } else if (spawnRule === 'land-only' && !isOnWater) {
+                    validLocation = true;
+                    console.log('✓ Valid land-lokation fundet');
+                }
+            }
+            
+            locationAttempts++;
+        }
+        
+        if (validLocation) {
+            break; // Vi fandt en valid lokation for denne alarm
+        }
+        
+        alarmAttempts++;
+    }
+    
+    // Hvis vi ikke kunne finde en valid lokation efter alle forsøg, fallback til standard metode
+    if (alarmAttempts >= 5) {
+        console.log('Kunne ikke finde en passende lokation efter 5 alarm-forsøg. Bruger fallback...');
+        // Fallback: Vælg en land-only alarm og placer den på land
+        const landOnlyAlarms = alarmTypes.filter(alarm => getSpawnRule(alarm) === 'land-only');
+        selectedAlarmType = landOnlyAlarms[Math.floor(Math.random() * landOnlyAlarms.length)];
+        
+        // Standard spawn-metode for land-only alarmer
+        do {
+            lat = station.position.lat + (Math.random() - 0.5) * (spawnRadiusKm / 111.32);
+            lng = station.position.lng + (Math.random() - 0.5) * (spawnRadiusKm / (111.32 * Math.cos(station.position.lat * Math.PI / 180)));
+            dist = distanceKm(station.position.lat, station.position.lng, lat, lng);
+        } while (dist > spawnRadiusKm);
+    }
+
+    // Rens alarm-teksten for tags
+    const cleanedAlarmType = cleanAlarmText(selectedAlarmType);
+    
     // Bruger den globale, inkrementerende tæller for unikke ID'er
     const id = nextAlarmId++; 
     
     const alarm = { 
         id, 
-        type, 
+        type: cleanedAlarmType, 
         position: { lat, lng }, 
         marker: null, 
         dispatchedVehiclesCount: 0, // NY: Tæller sendte køretøjer til denne alarm
@@ -36,7 +237,7 @@ function createAlarm(stations, alarmsArray, alarmSound, spawnRadiusKm) {
         creationTime: Game.gameTime // NY: Gemmer spiltidspunktet for alarmens oprettelse
     };
     // Antager createAlarmMarker funktionen er defineret et andet sted (f.eks. map.js)
-    alarm.marker = createAlarmMarker({ lat, lng }, id, type, alarm); 
+    alarm.marker = createAlarmMarker({ lat, lng }, id, cleanedAlarmType, alarm); 
     
     alarmsArray.push(alarm);
     alarmSound.play().catch(() => {}); // Afspiller alarmlyd, fanger fejl hvis lyden ikke kan afspilles

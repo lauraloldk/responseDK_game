@@ -421,5 +421,29 @@ const alarmTypes = [
     "Autohjælp: GPS navigation defekt",
     "Autohjælp: Mobiloplader virker ikke",
     "Autohjælp: Sæder kan ikke justeres",
-    "Autohjælp: Sikkerhedssele hænger"
+    "Autohjælp: Sikkerhedssele hænger",
+    // Vand-relaterede alarmer (kun på vand)
+    "Ambulance: Drukneulykke i sø #only-on-water#",
+    "Ambulance: Personredning fra vandfald #only-on-water#",
+    "Ambulance: Kajak uheld i å #only-on-water#",
+    "Ambulance: Sejlulykke i havn #only-on-water#",
+    "Ambulance: Redning fra sejlbåd #only-on-water#",
+    "Ambulance: Person faldet i vandet #only-on-water#",
+    "Ambulance: Windsurfer i nød #only-on-water#",
+    "Ambulance: Badende i nød #only-on-water#",
+    "Brand: Bådbrand i marina #only-on-water#",
+    "Brand: Skibsbrand i havn #only-on-water#",
+    "Brand: Eksplosion på lystbåd #only-on-water#",
+    "Brand: Olieudslip med brand #only-on-water#",
+    "Politi: Speedbåd uheld #only-on-water#",
+    "Politi: Mistænkelig aktivitet på vandet #only-on-water#",
+    "Politi: Ulovlig fiskeri #only-on-water#",
+    "Politi: Sejlbåd kollision #only-on-water#",
+    // Fleksible alarmer (både land og vand)
+    "Politi: Eftersøgning af person #can-spawn-on-water#",
+    "Ambulance: Helikopter redning #can-spawn-on-water#",
+    "Brand: Større redningsaktion #can-spawn-on-water#",
+    "Politi: Eftersøgning efter kriminel #can-spawn-on-water#",
+    "Ambulance: Redningshelikopter #can-spawn-on-water#",
+    "Brand: Større naturkatastrofe #can-spawn-on-water#"
 ];

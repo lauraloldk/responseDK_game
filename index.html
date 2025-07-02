@@ -276,6 +276,7 @@
     <div id="controls">
         <button onclick="Game.activateStationMode()">➕ Tilføj Station</button>
         <button onclick="Game.showVehicleSelectionPanel()">🚨 Alarmer køretøj</button>
+        <button onclick="testWaterAlarm()" title="Test vand-alarm funktionalitet">🌊 Test vand-alarm</button>
         <button onclick="Game.showStatusPanel()">📋 Status</button>
         <button onclick="Game.toggleStationsVisibility()">🏢 Vis/Skjul stationer</button>
         <button onclick="Game.toggleTheme()">🌓 Skift tema</button>
@@ -508,8 +509,8 @@
                 
                 if (selectedValue === "pause") {
                     // Set interval to 24 hours (24 * 60 * 60 * 1000 = 86400000 ms)
-                    this.alarmTimer = setInterval(() => {
-                        createAlarm(this.stations, this.alarms, this.alarmSound, this.ALARM_SPAWN_RADIUS_KM); 
+                    this.alarmTimer = setInterval(async () => {
+                        await createAlarm(this.stations, this.alarms, this.alarmSound, this.ALARM_SPAWN_RADIUS_KM); 
                     }, 86400000);
                 } else if (selectedValue === "random") {
                     this.randomAlarmMode = true;
@@ -517,8 +518,8 @@
                 } else {
                     // Normal interval
                     const ms = parseInt(selectedValue);
-                    this.alarmTimer = setInterval(() => {
-                        createAlarm(this.stations, this.alarms, this.alarmSound, this.ALARM_SPAWN_RADIUS_KM); 
+                    this.alarmTimer = setInterval(async () => {
+                        await createAlarm(this.stations, this.alarms, this.alarmSound, this.ALARM_SPAWN_RADIUS_KM); 
                     }, ms);
                 }
             },
@@ -527,8 +528,8 @@
                 if (this.alarmTimer) clearInterval(this.alarmTimer);
                 this.randomAlarmMode = false;
                 // Set interval to 24 hours (24 * 60 * 60 * 1000 = 86400000 ms)
-                this.alarmTimer = setInterval(() => {
-                    createAlarm(this.stations, this.alarms, this.alarmSound, this.ALARM_SPAWN_RADIUS_KM); 
+                this.alarmTimer = setInterval(async () => {
+                    await createAlarm(this.stations, this.alarms, this.alarmSound, this.ALARM_SPAWN_RADIUS_KM); 
                 }, 86400000);
                 alert("Alarmer sat på pause - næste alarm om 24 timer");
             },
@@ -548,8 +549,8 @@
                 const maxInterval = 300000; // 5 minutes
                 const randomInterval = Math.floor(Math.random() * (maxInterval - minInterval + 1)) + minInterval;
                 
-                this.alarmTimer = setTimeout(() => {
-                    createAlarm(this.stations, this.alarms, this.alarmSound, this.ALARM_SPAWN_RADIUS_KM);
+                this.alarmTimer = setTimeout(async () => {
+                    await createAlarm(this.stations, this.alarms, this.alarmSound, this.ALARM_SPAWN_RADIUS_KM);
                     this.scheduleRandomAlarm(); // Schedule next random alarm
                 }, randomInterval);
             },
@@ -822,6 +823,35 @@
             sendVehicleHome(vehicleId);
         }
         // --- END PATROL FUNCTIONS ---
+        
+        // --- TEST FUNCTIONS ---
+        function testWaterAlarm() {
+            if (Game.stations.length === 0) {
+                alert('Tilføj venligst mindst én station først.');
+                return;
+            }
+            
+            console.log('Tester vand-alarm funktionalitet...');
+            createAlarm(Game.stations, Game.alarms, Game.alarmSound, Game.ALARM_SPAWN_RADIUS_KM);
+        }
+        
+        // Test specifikke danske vand-lokationer
+        async function testDanishWaterLocations() {
+            const testLocations = [
+                { lat: 55.2, lng: 12.2, name: "Øresund" },
+                { lat: 57.7, lng: 10.6, name: "Skagerrak" },
+                { lat: 56.0, lng: 9.9, name: "Limfjorden" },
+                { lat: 55.4, lng: 11.1, name: "Store Bælt" },
+                { lat: 54.9, lng: 11.9, name: "Lolland kyst" }
+            ];
+            
+            console.log('Tester danske vand-lokationer:');
+            for (const loc of testLocations) {
+                const isWater = await isLocationOnWater(loc.lat, loc.lng);
+                console.log(`${loc.name}: ${isWater ? '🌊 VAND' : '🏞️ LAND'}`);
+            }
+        }
+        // --- END TEST FUNCTIONS ---
     </script>
 </body>
 </html>
