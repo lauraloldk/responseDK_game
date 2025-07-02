@@ -384,8 +384,7 @@ function displayVehicleSelectionPanel(stations) {
                             `;
                         }
                     }).join('')}
-                        }
-                    }).join('')}
+                </div>
                 </div>
             `).join('')}
         </div>
