@@ -81,7 +81,7 @@
         }
 
         /* Paneler generelt */
-        #køretøjsPanel, #statusPanel, #logPanel, #stationPanel {
+        #køretøjsPanel, #statusPanel, #logPanel, #stationPanel, #testPanel {
             position: absolute;
             top: 70px;
             left: 20px;
@@ -230,7 +230,14 @@
         .vehicle-item-disabled {
             color: #888;
             font-style: italic;
-            padding-left: 20px;
+            padding: 8px;
+            margin: 2px 0;
+        }
+        
+        .vehicle-item {
+            padding: 8px;
+            margin: 2px 0;
+            border-radius: 4px;
         }
         
         .vehicle-redirectable {
@@ -276,6 +283,7 @@
     <div id="controls">
         <button onclick="Game.activateStationMode()">➕ Tilføj Station</button>
         <button onclick="Game.showVehicleSelectionPanel()">🚨 Alarmer køretøj</button>
+        <button onclick="Game.showTestPanel()" title="Åbn test-værktøjer">🔧 Test-værktøjer</button>
         <button onclick="Game.showStatusPanel()">📋 Status</button>
         <button onclick="Game.toggleStationsVisibility()">🏢 Vis/Skjul stationer</button>
         <button onclick="Game.toggleTheme()">🌓 Skift tema</button>
@@ -321,6 +329,46 @@
     </div>
     <div id="logPanel"></div>
     <div id="stationPanel"></div>
+    <div id="testPanel">
+        <button class="close-btn" onclick="Game.hideAllPanels()">X</button>
+        <h3>🔧 Test-værktøjer</h3>
+        <p>Værktøjer til at teste alarm- og patrulje-funktionalitet:</p>
+        
+        <div style="margin: 10px 0;">
+            <button onclick="testWaterAlarm()" title="Test vand-alarm funktionalitet" style="width: 100%; margin: 5px 0; padding: 10px;">
+                🌊 Test vand-alarm
+            </button>
+            <small style="color: var(--text); opacity: 0.7;">Forsøger at spawne en alarm, der kun kan være på vand</small>
+        </div>
+        
+        <div style="margin: 10px 0;">
+            <button onclick="testLandAlarm()" title="Test land-alarm funktionalitet" style="width: 100%; margin: 5px 0; padding: 10px;">
+                🏞️ Test land-alarm
+            </button>
+            <small style="color: var(--text); opacity: 0.7;">Spawner en standard alarm på land</small>
+        </div>
+        
+        <div style="margin: 10px 0;">
+            <button onclick="testPatrolWaterLogic()" title="Test patrulje vand/land logik" style="width: 100%; margin: 5px 0; padding: 10px;">
+                🚁 Test patrulje-logik
+            </button>
+            <small style="color: var(--text); opacity: 0.7;">Tester om køretøjer respekterer vand/land grænser</small>
+        </div>
+        
+        <div style="margin: 10px 0;">
+            <button onclick="testDanishWaterLocations()" title="Test danske vand-lokationer" style="width: 100%; margin: 5px 0; padding: 10px;">
+                🗺️ Test vand-detektering
+            </button>
+            <small style="color: var(--text); opacity: 0.7;">Tester detektering af danske vandområder med nøjagtighedsanalyse</small>
+        </div>
+        
+        <div style="margin: 10px 0;">
+            <button onclick="clearWaterCache()" title="Ryd vand-cache" style="width: 100%; margin: 5px 0; padding: 8px; background: #ff9800; color: white;">
+                🗑️ Ryd vand-cache
+            </button>
+            <small style="color: var(--text); opacity: 0.7;">Rydder cachet for vand-lokationer for friske tests</small>
+        </div>
+    </div>
 
     <div id="saveLoadPanel">
         <h2 id="panelTitle"></h2>
@@ -344,12 +392,16 @@
     <script src="stationer.js"></script>
     <script src="alarmliste.js"></script>
     <script src="alarmer.js"></script>
+    <script src="water.js"></script>
     <script src="save.js"></script>
     <script src="load.js"></script>
     <script src="customROM.js"></script>
+    <script src="search.js"></script>
+    <script src="utils.js"></script>
+    <script src="debugtools.js"></script>
 
     <script>
-        // Hoved Game objekt for at orkestrere de forskellige moduler
+        // --- GAME OBJEKT ---
         const Game = {
             map: null,
             stations: [],
@@ -361,17 +413,15 @@
             alarmTimer: null,
             missionLog: [],
             gameTime: 0, 
-            randomAlarmMode: false, // New property for tracking random alarm mode 
-            searchedLocation: null, // Store location from address search
-            searchedAddress: null, // Store address name from search
-            addressMarker: null, // Store reference to address marker 
+            randomAlarmMode: false,
+            searchedLocation: null,
+            searchedAddress: null,
+            addressMarker: null,
 
             // Konstanter for animation
             REFRESH_INTERVAL_MS: 300,
             STANDARD_TRAVEL_TIME_SECONDS: 1700,
-            
-            // New setting for alarm spawn radius (in kilometers)
-            ALARM_SPAWN_RADIUS_KM: 10, // Default to 10km for now
+            ALARM_SPAWN_RADIUS_KM: 10,
 
             init: function() {
                 this.map = initMap(); 
@@ -388,25 +438,20 @@
                     this.stationModeActive = false;
                 });
                 
-                // Add an event listener for the 'beforeunload' event to prompt the user to save
                 window.addEventListener('beforeunload', (event) => {
                     event.preventDefault(); 
                     event.returnValue = ''; 
                 });
 
-                // Initialiser/opdater statuspaneler med det samme
                 this.updateStatusPanels(); 
-                // Opdater spilletid hvert sekund
-                // Rettet: Nu opdateres _kun_ spilletiden her, og Game.updateStatusPanels kaldes kun, når UI kræver det.
                 setInterval(() => {
                     this.gameTime++;
-                    this.updateGameTimeDisplay(); // Ny funktion til kun at opdatere tiden
+                    this.updateGameTimeDisplay();
                 }, 1000);
                 
-                // Load custom ROM if enabled (after a short delay to ensure everything is ready)
                 setTimeout(() => {
                     loadCustomROMIfEnabled();
-                    this.updateStatusPanels(); // Update UI after potential ROM load
+                    this.updateStatusPanels();
                 }, 100);
             },
 
@@ -423,13 +468,11 @@
 
             addStationAtSearchedLocation: function() {
                 if (this.searchedLocation) {
-                    // Remove the address marker if it exists
                     if (this.addressMarker) {
                         this.map.removeLayer(this.addressMarker);
                         this.addressMarker = null;
                     }
                     
-                    // Directly prompt for station name and create station
                     const stationName = prompt("Indtast navn for den nye brandstation:");
                     if (!stationName) {
                         alert("Stationsnavnet må ikke være tomt.");
@@ -444,16 +487,36 @@
                         marker: null
                     };
 
-                    // Create marker for the station
                     newStation.marker = createStationMarker(newStation.position, newStation.navn, newStation);
                     
                     this.stations.push(newStation);
                     this.updateStatusPanels();
                     alert(`${stationName} er blevet oprettet på ${this.searchedAddress}.`);
                     
-                    // Reset button and clear stored location
                     this.resetAddStationButton();
                 }
+            },
+
+            addStationAtAddress: function(location) {
+                this.searchedLocation = location;
+                this.searchedAddress = "Valgt lokation";
+                
+                const addStationBtn = document.querySelector('button[onclick="Game.activateStationMode()"]');
+                if (addStationBtn) {
+                    addStationBtn.innerHTML = '📍 Tilføj Station Her';
+                    addStationBtn.onclick = () => Game.addStationAtSearchedLocation();
+                }
+                
+                this.hideAllPanels();
+                
+                if (this.addressMarker) {
+                    this.map.removeLayer(this.addressMarker);
+                }
+                
+                this.addressMarker = L.marker([location.lat, location.lng])
+                    .addTo(this.map)
+                    .bindPopup('Klik "Tilføj Station Her" for at placere en station')
+                    .openPopup();
             },
 
             resetAddStationButton: function() {
@@ -486,8 +549,17 @@
                     panel.style.display = 'none'; 
                 } else {
                     this.hideAllPanels(); 
-                    // Opdater indholdet lige før visning for at sikre friske data
                     this.updateStatusPanels(); 
+                    panel.style.display = 'block'; 
+                }
+            },
+
+            showTestPanel: function() {
+                const panel = document.getElementById("testPanel");
+                if (panel.style.display === 'block') { 
+                    panel.style.display = 'none'; 
+                } else {
+                    this.hideAllPanels(); 
                     panel.style.display = 'block'; 
                 }
             },
@@ -503,38 +575,44 @@
 
             updateAlarmInterval: function() {
                 const selectedValue = document.getElementById("intervalVælger").value;
-                if (this.alarmTimer) clearInterval(this.alarmTimer);
-                this.randomAlarmMode = false; // Reset random mode by default
+                if (this.alarmTimer) clearTimeout(this.alarmTimer);
+                this.randomAlarmMode = false;
                 
                 if (selectedValue === "pause") {
-                    // Set interval to 24 hours (24 * 60 * 60 * 1000 = 86400000 ms)
-                    this.alarmTimer = setInterval(() => {
-                        createAlarm(this.stations, this.alarms, this.alarmSound, this.ALARM_SPAWN_RADIUS_KM); 
-                    }, 86400000);
+                    this.scheduleNextAlarm(86400000);
                 } else if (selectedValue === "random") {
                     this.randomAlarmMode = true;
                     this.scheduleRandomAlarm();
                 } else {
-                    // Normal interval
                     const ms = parseInt(selectedValue);
-                    this.alarmTimer = setInterval(() => {
-                        createAlarm(this.stations, this.alarms, this.alarmSound, this.ALARM_SPAWN_RADIUS_KM); 
-                    }, ms);
+                    this.currentAlarmInterval = ms;
+                    this.scheduleNextAlarm(ms);
                 }
             },
 
+            scheduleNextAlarm: function(intervalMs) {
+                this.alarmTimer = setTimeout(async () => {
+                    const success = await createAlarm(this.stations, this.alarms, this.alarmSound, this.ALARM_SPAWN_RADIUS_KM);
+                    if (success) {
+                        if (!this.randomAlarmMode) {
+                            this.scheduleNextAlarm(intervalMs);
+                        }
+                    } else {
+                        console.log('Alarm oprettelse fejlede, prøver igen om 10 sekunder...');
+                        this.scheduleNextAlarm(10000);
+                    }
+                }, intervalMs);
+            },
+
             pauseAlarms: function() {
-                if (this.alarmTimer) clearInterval(this.alarmTimer);
+                if (this.alarmTimer) clearTimeout(this.alarmTimer);
                 this.randomAlarmMode = false;
-                // Set interval to 24 hours (24 * 60 * 60 * 1000 = 86400000 ms)
-                this.alarmTimer = setInterval(() => {
-                    createAlarm(this.stations, this.alarms, this.alarmSound, this.ALARM_SPAWN_RADIUS_KM); 
-                }, 86400000);
+                this.scheduleNextAlarm(86400000);
                 alert("Alarmer sat på pause - næste alarm om 24 timer");
             },
 
             randomAlarmInterval: function() {
-                if (this.alarmTimer) clearInterval(this.alarmTimer);
+                if (this.alarmTimer) clearTimeout(this.alarmTimer);
                 this.randomAlarmMode = true;
                 this.scheduleRandomAlarm();
                 alert("Tilfældig alarm-interval aktiveret (10 sekunder - 5 minutter)");
@@ -543,14 +621,18 @@
             scheduleRandomAlarm: function() {
                 if (!this.randomAlarmMode) return;
                 
-                // Random interval between 10 seconds (10000ms) and 5 minutes (300000ms)
-                const minInterval = 10000;  // 10 seconds
-                const maxInterval = 300000; // 5 minutes
+                const minInterval = 10000;
+                const maxInterval = 300000;
                 const randomInterval = Math.floor(Math.random() * (maxInterval - minInterval + 1)) + minInterval;
                 
-                this.alarmTimer = setTimeout(() => {
-                    createAlarm(this.stations, this.alarms, this.alarmSound, this.ALARM_SPAWN_RADIUS_KM);
-                    this.scheduleRandomAlarm(); // Schedule next random alarm
+                this.alarmTimer = setTimeout(async () => {
+                    const success = await createAlarm(this.stations, this.alarms, this.alarmSound, this.ALARM_SPAWN_RADIUS_KM);
+                    if (success) {
+                        this.scheduleRandomAlarm();
+                    } else {
+                        console.log('Random alarm oprettelse fejlede, prøver igen om 10 sekunder...');
+                        this.alarmTimer = setTimeout(() => this.scheduleRandomAlarm(), 10000);
+                    }
                 }, randomInterval);
             },
             
@@ -570,7 +652,7 @@
                 );
                 this.selectedVehicles = []; 
                 document.getElementById("køretøjsPanel").style.display = 'none';
-                this.updateStatusPanels(); // Update status after dispatch
+                this.updateStatusPanels();
             },
 
             chooseAlarmAndDispatch: function() {
@@ -593,12 +675,11 @@
                 document.getElementById("køretøjsPanel").style.display = 'none';
                 document.getElementById("statusPanel").style.display = 'none';
                 document.getElementById("logPanel").style.display = 'none'; 
+                document.getElementById("testPanel").style.display = 'none'; 
                 document.getElementById("saveLoadPanel").style.display = 'none'; 
             },
 
-            // --- NY FUNKTION: Opdaterer alle statuspaneler ---
             updateStatusPanels: function() {
-                // Opdater alarm liste
                 const alarmList = document.getElementById('alarmList');
                 alarmList.innerHTML = '';
                 this.alarms.forEach(alarm => {
@@ -608,7 +689,6 @@
                 });
                 document.getElementById('activeAlarmsCount').textContent = this.alarms.length;
 
-                // Opdater køretøjsliste MED KLIKBART STATIONSNAVN
                 const vehicleList = document.getElementById('vehicleList');
                 vehicleList.innerHTML = '';
                 let totalVehicles = 0;
@@ -616,7 +696,6 @@
                     station.køretøjer.forEach(vehicle => {
                         totalVehicles++;
                         const listItem = document.createElement('li');
-                        // Gør stationens navn klikbart
                         const stationLink = `<span class="station-link" onclick="showStationDetails(Game.stations.find(s => s.id === '${station.id}'))">${station.navn}</span>`;
 
                         listItem.innerHTML = `
@@ -627,7 +706,6 @@
                 });
                 document.getElementById('totalVehiclesCount').textContent = totalVehicles;
 
-                // Opdater missionslog
                 const missionLogList = document.getElementById('missionLogList');
                 missionLogList.innerHTML = '';
                 this.missionLog.forEach(log => {
@@ -636,16 +714,14 @@
                     missionLogList.appendChild(listItem);
                 });
 
-                // Opdater spilletid (flyttet til separat funktion for at undgå fejl)
                 this.updateGameTimeDisplay();
             },
 
-            // Ny funktion til kun at opdatere spilletiden
             updateGameTimeDisplay: function() {
                 const minutes = Math.floor(this.gameTime / 60);
                 const seconds = this.gameTime % 60;
                 const gameTimeElement = document.getElementById('gameTimeDisplay');
-                if (gameTimeElement) { // Tjek om elementet eksisterer, før du opdaterer
+                if (gameTimeElement) {
                     gameTimeElement.textContent = `Tid: ${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
                 }
             }
@@ -659,169 +735,13 @@
         // Vis aktuelt klokkeslæt (realtid)
         setInterval(() => {
             const now = new Date();
-            const timeString = now.toLocaleTimeString('da-DK'); // Format: HH:MM:SS
+            const timeString = now.toLocaleTimeString('da-DK');
             const clockDisplay = document.getElementById('realClockDisplay');
             if (clockDisplay) clockDisplay.textContent = `Klokken: ${timeString}`;
         }, 1000);
 
 
-        // Lav nogle globale funktioner, som HTML kan kalde direkte
-        function sendKøretøjerTilAlarm(alarmIndex) {
-            Game.sendSelectedVehiclesToAlarm(alarmIndex);
-        }
 
-        function selectVehicleForDispatch(stationIdx, vehicleIdx) {
-            const vehicle = Game.stations[stationIdx].køretøjer[vehicleIdx];
-            const index = Game.selectedVehicles.indexOf(vehicle);
-            if (index > -1) Game.selectedVehicles.splice(index, 1);
-            else Game.selectedVehicles.push(vehicle);
-        }
-
-        // --- STATIONS FUNKTIONER ER FLYTTET TIL STATIONER.JS ---
-        // Følgende funktioner er nu i stationer.js:
-        // - showStationDetails()
-        // - addVehicleToSelectedStation()
-        // - deleteVehicleFromStation()
-        // - editVehicleInStation() 
-        // - deleteSelectedStation()
-        // - renameSelectedStation()
-        // --- END STATIONS FUNKTIONER ---
-
-        // --- GLOBAL FUNCTIONS FOR SAVE/LOAD PANEL ---
-        function showSaveLoadPanel(mode) {
-            Game.hideAllPanels(); // Hide other panels first
-            const panel = document.getElementById('saveLoadPanel');
-            const panelTitle = document.getElementById('panelTitle');
-            const saveContent = document.getElementById('saveContent');
-            const loadContent = document.getElementById('loadContent');
-            
-            panel.style.display = 'block';
-
-            if (mode === 'save') {
-                panelTitle.textContent = "Gem spil";
-                saveContent.style.display = 'block';
-                loadContent.style.display = 'none';
-                document.getElementById('saveCodeOutput').value = generateSaveCode(Game); // Call save function
-                document.getElementById('saveCodeOutput').select(); // Select text for easy copying
-            } else if (mode === 'load') {
-                panelTitle.textContent = "Indlæs spil";
-                saveContent.style.display = 'none';
-                loadContent.style.display = 'block';
-                document.getElementById('loadCodeInput').value = ''; // Clear previous input
-            }
-        }
-
-        function hideSaveLoadPanel() {
-            document.getElementById('saveLoadPanel').style.display = 'none';
-        }
-
-        function copySaveCode() {
-            const saveCodeOutput = document.getElementById('saveCodeOutput');
-            saveCodeOutput.select();
-            document.execCommand('copy');
-            alert("Kode kopieret til udklipsholder!");
-        }
-        // loadGameAction is now defined in load.js
-        // --- END GLOBAL FUNCTIONS FOR SAVE/LOAD PANEL ---
-
-        // --- ADDRESS SEARCH FUNCTIONS ---
-        function handleAddressSearch(event) {
-            if (event.key === 'Enter') {
-                searchAddress();
-            }
-        }
-
-        function searchAddress() {
-            const query = document.getElementById('addressSearch').value.trim();
-            if (!query) {
-                alert('Indtast venligst en adresse at søge efter.');
-                return;
-            }
-
-            // Use Nominatim (OpenStreetMap) geocoding service
-            const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&countrycodes=dk&limit=5`;
-            
-            fetch(url)
-                .then(response => response.json())
-                .then(data => {
-                    if (data && data.length > 0) {
-                        showAddressResults(data, query);
-                    } else {
-                        alert('Ingen resultater fundet for den angivne adresse.');
-                    }
-                })
-                .catch(error => {
-                    console.error('Fejl ved søgning:', error);
-                    alert('Der opstod en fejl under søgningen. Prøv venligst igen.');
-                });
-        }
-
-        function showAddressResults(results, originalQuery) {
-            Game.hideAllPanels(); // Hide other panels first
-            const panel = document.getElementById('køretøjsPanel');
-            
-            let resultsHTML = `
-                <button class="close-btn" onclick="Game.hideAllPanels()">X</button>
-                <h3>Adresse søgeresultater</h3>
-                <p>Søgte efter: <strong>${originalQuery}</strong></p>
-                <p>Klik på en adresse for at gå til den på kortet:</p>
-            `;
-            
-            results.forEach((result, index) => {
-                resultsHTML += `
-                    <div style="margin-bottom: 10px; padding: 8px; border: 1px solid var(--border); border-radius: 4px; background: var(--button-bg);">
-                        <strong>${result.display_name}</strong><br>
-                        <button onclick="goToAddress({lat: ${result.lat}, lng: ${result.lon}, name: '${result.display_name.replace(/'/g, "&apos;")}'})">Gå til adresse</button>
-                        <button onclick="Game.addStationAtAddress({lat: ${result.lat}, lng: ${result.lon}})">Tilføj Station</button>
-                    </div>
-                `;
-            });
-            
-            panel.innerHTML = resultsHTML;
-            panel.style.display = 'block';
-        }
-
-        function goToAddress(addressData) {
-            Game.hideAllPanels();
-            Game.map.setView([addressData.lat, addressData.lng], 15); // Zoom to the address
-            
-            // Optional: Add a temporary marker to show the searched location
-            const tempMarker = L.marker([addressData.lat, addressData.lng])
-                .addTo(Game.map)
-                .bindPopup(`<strong>Søgt adresse:</strong><br>${addressData.name}`)
-                .openPopup();
-            
-            // Remove the temporary marker after 10 seconds
-            setTimeout(() => {
-                Game.map.removeLayer(tempMarker);
-            }, 10000);
-        }
-        // --- END ADDRESS SEARCH FUNCTIONS ---
-
-        // --- PATROL FUNCTIONS ---
-        function findVehicleById(vehicleId) {
-            for (const station of Game.stations) {
-                for (const vehicle of station.køretøjer) {
-                    if (vehicle.id === vehicleId) {
-                        return vehicle;
-                    }
-                }
-            }
-            return null;
-        }
-
-        function startVehiclePatrolling(vehicleId) {
-            startPatrolling(vehicleId);
-        }
-
-        function stopVehiclePatrolling(vehicleId) {
-            stopPatrolling(vehicleId);
-        }
-
-        function sendVehicleToHome(vehicleId) {
-            sendVehicleHome(vehicleId);
-        }
-        // --- END PATROL FUNCTIONS ---
     </script>
 </body>
 </html>

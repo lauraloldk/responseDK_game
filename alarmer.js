@@ -1,6 +1,160 @@
 // alarmer.js
 let nextAlarmId = 1; // Denne tæller skal kun tælle opad.
 
+// Cache for vand-lokationer for at reducere API-kald
+const waterLocationCache = new Map();
+
+/**
+ * Simpel heuristik til at bestemme om koordinater sandsynligvis er på vand
+ * Baseret på danske geografiske karakteristika
+ * @param {number} lat - Latitude
+ * @param {number} lng - Longitude
+ * @returns {boolean} - True hvis sandsynligvis vand
+ */
+function isLikelyWaterLocation(lat, lng) {
+    // Danmark er omgivet af vand, så punkter uden for hovedland er ofte vand
+    const danmarkMainland = {
+        minLat: 54.8, maxLat: 57.1,
+        minLng: 9.5, maxLng: 12.7
+    };
+    
+    // Hvis uden for hovedland Danmark, højere chance for vand
+    if (lat < danmarkMainland.minLat || lat > danmarkMainland.maxLat || 
+        lng < danmarkMainland.minLng || lng > danmarkMainland.maxLng) {
+        return true; // Antag vand hvis uden for hovedland
+    }
+    
+    // Indre Danmark, antag land medmindre andet bevises
+    return false;
+}
+
+/**
+ * Tjekker om et sæt koordinater er på vand ved hjælp af en ekstern service
+ * @param {number} lat - Latitude
+ * @param {number} lng - Longitude
+ * @returns {Promise<boolean>} - True hvis lokationen er på vand, false hvis på land
+ */
+async function isLocationOnWater(lat, lng) {
+    // Først, tjek cachen
+    const cacheKey = `${lat.toFixed(4)},${lng.toFixed(4)}`;
+    if (waterLocationCache.has(cacheKey)) {
+        const cachedResult = waterLocationCache.get(cacheKey);
+        console.log(`Cache hit for ${lat.toFixed(4)}, ${lng.toFixed(4)}: ${cachedResult ? 'VAND' : 'LAND'}`);
+        return cachedResult;
+    }
+    
+    try {
+        // Tilføj en lille delay for at respektere API rate limits
+        await new Promise(resolve => setTimeout(resolve, 200));
+        
+        // Bruger OpenStreetMap Nominatim til reverse geocoding
+        const response = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&zoom=18&addressdetails=1&extratags=1`);
+        const data = await response.json();
+        
+        // Først: Tjek error eller manglende data
+        if (data.error || !data.display_name) {
+            // Hvis der ikke er data, brug geografisk heuristik i stedet for tilfældigt gæt
+            const isWater = isLikelyWaterLocation(lat, lng);
+            waterLocationCache.set(cacheKey, isWater);
+            setTimeout(() => waterLocationCache.delete(cacheKey), 1000 * 60 * 30); // Cache i 30 minutter
+            console.log(`API returnerede ingen data for ${lat.toFixed(4)}, ${lng.toFixed(4)} - bruger heuristik: ${isWater ? 'VAND' : 'LAND'}`);
+            return isWater;
+        }
+        
+        // Tjek place_type eller class først (mest pålidelig)
+        if (data.class === 'natural') {
+            const waterTypes = ['water', 'bay', 'coastline', 'beach', 'reef', 'strait', 'fjord'];
+            if (waterTypes.includes(data.type)) {
+                waterLocationCache.set(cacheKey, true);
+                setTimeout(() => waterLocationCache.delete(cacheKey), 1000 * 60 * 60); // Cache i 1 time
+                console.log(`✓ Bekræftet VAND ved ${lat.toFixed(4)}, ${lng.toFixed(4)} - klasse: ${data.class}, type: ${data.type}`);
+                return true;
+            }
+        }
+        
+        if (data.class === 'waterway') {
+            waterLocationCache.set(cacheKey, true);
+            setTimeout(() => waterLocationCache.delete(cacheKey), 1000 * 60 * 60); // Cache i 1 time
+            console.log(`✓ Bekræftet VAND ved ${lat.toFixed(4)}, ${lng.toFixed(4)} - vandvej: ${data.type}`);
+            return true; // Floder, kanaler, etc.
+        }
+        
+        // Tjek display_name for vand-indikatorer
+        if (data.display_name) {
+            const displayName = data.display_name.toLowerCase();
+            const waterKeywords = [
+                'ocean', 'sea', 'lake', 'river', 'bay', 'strait', 'sound', 'fjord', 'pond', 'reservoir',
+                'hav', 'sø', 'å', 'bugt', 'fjord', 'sund', 'vand', 'water', 'kanal', 'canal',
+                'øresund', 'kattegat', 'skagerrak', 'bælt', 'belt', 'marina', 'havn', 'harbor', 'port'
+            ];
+            
+            if (waterKeywords.some(keyword => displayName.includes(keyword))) {
+                waterLocationCache.set(cacheKey, true);
+                setTimeout(() => waterLocationCache.delete(cacheKey), 1000 * 60 * 60); // Cache i 1 time
+                console.log(`✓ Bekræftet VAND ved ${lat.toFixed(4)}, ${lng.toFixed(4)} - navnebeskrivelse indeholder vand-nøgleord`);
+                return true;
+            }
+        }
+        
+        // Tjek extraTags for vand-indikatorer
+        if (data.extratags) {
+            if (data.extratags.water || data.extratags.waterway || data.extratags.natural === 'water') {
+                waterLocationCache.set(cacheKey, true);
+                setTimeout(() => waterLocationCache.delete(cacheKey), 1000 * 60 * 60); // Cache i 1 time
+                console.log(`✓ Bekræftet VAND ved ${lat.toFixed(4)}, ${lng.toFixed(4)} - extratags indeholder vand`);
+                return true;
+            }
+        }
+        
+        // Hvis der ikke er adresse-komponenter, brug mere pålidelig logik
+        if (!data.address || Object.keys(data.address).length <= 1) {
+            // Brug heuristik baseret på danske koordinater
+            const isWater = isLikelyWaterLocation(lat, lng);
+            waterLocationCache.set(cacheKey, isWater);
+            setTimeout(() => waterLocationCache.delete(cacheKey), 1000 * 60 * 30); // Cache i 30 minutter
+            console.log(`Ingen adressedata for ${lat.toFixed(4)}, ${lng.toFixed(4)} - bruger heuristik: ${isWater ? 'VAND' : 'LAND'}`);
+            return isWater;
+        }
+        
+        // Hvis vi kommer hertil, har vi en gyldig adresse = det er land
+        waterLocationCache.set(cacheKey, false);
+        setTimeout(() => waterLocationCache.delete(cacheKey), 1000 * 60 * 60); // Cache i 1 time
+        console.log(`✓ Bekræftet LAND ved ${lat.toFixed(4)}, ${lng.toFixed(4)} - fundet gyldig adresse: ${data.display_name}`);
+        return false;
+    } catch (error) {
+        console.log('Fejl ved kontrol af vand-lokation:', error);
+        // Hvis API'et fejler, brug heuristik i stedet for tilfældigt gæt
+        const isWater = isLikelyWaterLocation(lat, lng);
+        waterLocationCache.set(cacheKey, isWater);
+        setTimeout(() => waterLocationCache.delete(cacheKey), 1000 * 60 * 10); // Cache i 10 minutter ved fejl
+        console.log(`API-fejl for ${lat.toFixed(4)}, ${lng.toFixed(4)} - bruger heuristik: ${isWater ? 'VAND' : 'LAND'}`);
+        return isWater;
+    }
+}
+
+/**
+ * Ekstraherer spawn-regel fra alarm-teksten
+ * @param {string} alarmText - Teksten for alarmen
+ * @returns {string} - 'only-water', 'can-spawn-on-water', eller 'land-only' (standard)
+ */
+function getSpawnRule(alarmText) {
+    if (alarmText.includes('#only-on-water#')) {
+        return 'only-water';
+    } else if (alarmText.includes('#can-spawn-on-water#')) {
+        return 'can-spawn-on-water';
+    }
+    return 'land-only';
+}
+
+/**
+ * Renser alarm-teksten for spawn-regel tags
+ * @param {string} alarmText - Den originale alarm-tekst
+ * @returns {string} - Alarm-tekst uden tags
+ */
+function cleanAlarmText(alarmText) {
+    return alarmText.replace(/#only-on-water#/g, '').replace(/#can-spawn-on-water#/g, '').trim();
+}
+
 /**
  * Opretter en ny alarm på kortet.
  * @param {Array<Object>} stations - Array af alle stationer.
@@ -8,27 +162,90 @@ let nextAlarmId = 1; // Denne tæller skal kun tælle opad.
  * @param {HTMLAudioElement} alarmSound - Lyden der skal afspilles ved ny alarm.
  * @param {number} spawnRadiusKm - Radius i km omkring en station, hvor alarmen kan opstå.
  */
-function createAlarm(stations, alarmsArray, alarmSound, spawnRadiusKm) { 
-    if (stations.length === 0) return;
+async function createAlarm(stations, alarmsArray, alarmSound, spawnRadiusKm) { 
+    if (stations.length === 0) return false;
 
     const randomStationIndex = Math.floor(Math.random() * stations.length);
     const station = stations[randomStationIndex];
 
+    let selectedAlarmType = null;
     let lat, lng, dist;
-    // Sikrer at alarmen spawnes inden for den specificerede radius
-    do {
-        lat = station.position.lat + (Math.random() - 0.5) * (spawnRadiusKm / 111.32); // Ca. grader pr. KM
-        lng = station.position.lng + (Math.random() - 0.5) * (spawnRadiusKm / (111.32 * Math.cos(station.position.lat * Math.PI / 180)));
-        dist = distanceKm(station.position.lat, station.position.lng, lat, lng);
-    } while (dist > spawnRadiusKm);
+    let maxAttempts = 20;
+    let alarmAttempts = 0;
 
-    const type = alarmTypes[Math.floor(Math.random() * alarmTypes.length)];
+    // Først vælg en alarm-type, derefter find en passende lokation
+    while (alarmAttempts < 5) { // Max 5 alarm-forsøg
+        selectedAlarmType = alarmTypes[Math.floor(Math.random() * alarmTypes.length)];
+        const spawnRule = getSpawnRule(selectedAlarmType);
+        
+        console.log(`Forsøger alarm: "${selectedAlarmType}" med regel: ${spawnRule}`);
+        
+        let locationAttempts = 0;
+        let validLocation = false;
+        
+        // Find en lokation der overholder alarm-reglen
+        while (locationAttempts < maxAttempts && !validLocation) {
+            // Generér tilfældig lokation inden for radius
+            lat = station.position.lat + (Math.random() - 0.5) * (spawnRadiusKm / 111.32);
+            lng = station.position.lng + (Math.random() - 0.5) * (spawnRadiusKm / (111.32 * Math.cos(station.position.lat * Math.PI / 180)));
+            dist = distanceKm(station.position.lat, station.position.lng, lat, lng);
+            
+            if (dist <= spawnRadiusKm) {
+                // Tjek om lokationen overholder spawn-reglen
+                const isOnWater = await isLocationOnWater(lat, lng);
+                
+                console.log(`Lokation ${lat.toFixed(4)}, ${lng.toFixed(4)} - på vand: ${isOnWater}, regel: ${spawnRule}`);
+                
+                if (spawnRule === 'only-water' && isOnWater) {
+                    validLocation = true;
+                    console.log('✓ Valid vand-lokation fundet');
+                } else if (spawnRule === 'can-spawn-on-water') {
+                    validLocation = true; // Kan spawne både på land og vand
+                    console.log('✓ Fleksibel lokation accepteret');
+                } else if (spawnRule === 'land-only' && !isOnWater) {
+                    validLocation = true;
+                    console.log('✓ Valid land-lokation fundet');
+                }
+            }
+            
+            locationAttempts++;
+        }
+        
+        if (validLocation) {
+            break; // Vi fandt en valid lokation for denne alarm
+        }
+        
+        alarmAttempts++;
+    }
+    
+    // Hvis vi ikke kunne finde en valid lokation efter alle forsøg, fallback til standard metode
+    if (alarmAttempts >= 5) {
+        console.log('Kunne ikke finde en passende lokation efter 5 alarm-forsøg. Bruger fallback...');
+        // Fallback: Vælg en land-only alarm og placer den på land
+        const landOnlyAlarms = alarmTypes.filter(alarm => getSpawnRule(alarm) === 'land-only');
+        if (landOnlyAlarms.length === 0) {
+            console.log('Ingen land-only alarmer fundet til fallback!');
+            return false; // Kan ikke oprette alarm
+        }
+        selectedAlarmType = landOnlyAlarms[Math.floor(Math.random() * landOnlyAlarms.length)];
+        
+        // Standard spawn-metode for land-only alarmer
+        do {
+            lat = station.position.lat + (Math.random() - 0.5) * (spawnRadiusKm / 111.32);
+            lng = station.position.lng + (Math.random() - 0.5) * (spawnRadiusKm / (111.32 * Math.cos(station.position.lat * Math.PI / 180)));
+            dist = distanceKm(station.position.lat, station.position.lng, lat, lng);
+        } while (dist > spawnRadiusKm);
+    }
+
+    // Rens alarm-teksten for tags
+    const cleanedAlarmType = cleanAlarmText(selectedAlarmType);
+    
     // Bruger den globale, inkrementerende tæller for unikke ID'er
     const id = nextAlarmId++; 
     
     const alarm = { 
         id, 
-        type, 
+        type: cleanedAlarmType, 
         position: { lat, lng }, 
         marker: null, 
         dispatchedVehiclesCount: 0, // NY: Tæller sendte køretøjer til denne alarm
@@ -36,11 +253,14 @@ function createAlarm(stations, alarmsArray, alarmSound, spawnRadiusKm) {
         creationTime: Game.gameTime // NY: Gemmer spiltidspunktet for alarmens oprettelse
     };
     // Antager createAlarmMarker funktionen er defineret et andet sted (f.eks. map.js)
-    alarm.marker = createAlarmMarker({ lat, lng }, id, type, alarm); 
+    alarm.marker = createAlarmMarker({ lat, lng }, id, cleanedAlarmType, alarm); 
     
     alarmsArray.push(alarm);
     alarmSound.play().catch(() => {}); // Afspiller alarmlyd, fanger fejl hvis lyden ikke kan afspilles
     Game.updateStatusPanels(); // Vigtigt: Opdater UI når en ny alarm er oprettet
+    
+    console.log(`✅ Alarm oprettet: "${cleanedAlarmType}" på ${lat.toFixed(4)}, ${lng.toFixed(4)}`);
+    return true; // Alarm blev oprettet succesfuldt
 }
 
 /**
@@ -483,21 +703,66 @@ function stopPatrolling(vehicleId) {
  * Flytter et køretøj til et tilfældigt punkt inden for patrouljeringsområdet
  * @param {Object} vehicle - Køretøjsobjektet
  */
-function moveToRandomPatrolPoint(vehicle) {
+async function moveToRandomPatrolPoint(vehicle) {
     if (!vehicle.patrolling || vehicle.status !== 'patrouillerer' || vehicle.animationPaused) {
         return;
     }
     
     const station = vehicle.station;
     const radiusKm = 50; // Fast 50 km radius for patrouljering
+    const isVehicleHelicopter = isHelicopter(vehicle);
     
-    // Generer tilfældig position inden for radius
     let lat, lng, dist;
-    do {
-        lat = station.position.lat + (Math.random() - 0.5) * (radiusKm / 111.32);
-        lng = station.position.lng + (Math.random() - 0.5) * (radiusKm / (111.32 * Math.cos(station.position.lat * Math.PI / 180)));
-        dist = distanceKm(station.position.lat, station.position.lng, lat, lng);
-    } while (dist > radiusKm);
+    let validLocation = false;
+    let attempts = 0;
+    const maxAttempts = 15; // Færre forsøg for patruljering
+    
+    // Find en passende patrulje-lokation
+    while (!validLocation && attempts < maxAttempts) {
+        // Generer tilfældig position inden for radius
+        do {
+            lat = station.position.lat + (Math.random() - 0.5) * (radiusKm / 111.32);
+            lng = station.position.lng + (Math.random() - 0.5) * (radiusKm / (111.32 * Math.cos(station.position.lat * Math.PI / 180)));
+            dist = distanceKm(station.position.lat, station.position.lng, lat, lng);
+        } while (dist > radiusKm);
+        
+        if (isVehicleHelicopter) {
+            // Helikoptere kan flyve hvor som helst (både land og vand)
+            validLocation = true;
+            console.log(`🚁 Helikopter ${vehicle.navn} flyver til patrulje-punkt: ${lat.toFixed(4)}, ${lng.toFixed(4)} (kan være både land/vand)`);
+        } else {
+            // Landkøretøjer skal holde sig på land
+            try {
+                const isOnWater = await isLocationOnWater(lat, lng);
+                if (!isOnWater) {
+                    validLocation = true;
+                    console.log(`🚗 ${vehicle.navn} kører til land-patrulje: ${lat.toFixed(4)}, ${lng.toFixed(4)}`);
+                } else {
+                    console.log(`💧 ${vehicle.navn} springer vand-lokation over: ${lat.toFixed(4)}, ${lng.toFixed(4)}`);
+                }
+            } catch (error) {
+                // Hvis vand-tjek fejler, brug heuristik
+                const likelyWater = isLikelyWaterLocation(lat, lng);
+                if (!likelyWater) {
+                    validLocation = true;
+                    console.log(`🚗 ${vehicle.navn} bruger heuristik (sandsynligvis land): ${lat.toFixed(4)}, ${lng.toFixed(4)}`);
+                } else {
+                    console.log(`💧 ${vehicle.navn} springer sandsynlig vand-lokation over (heuristik): ${lat.toFixed(4)}, ${lng.toFixed(4)}`);
+                }
+            }
+        }
+        
+        attempts++;
+    }
+    
+    // Hvis ingen valid lokation blev fundet, brug en sikker fallback nær stationen
+    if (!validLocation) {
+        console.log(`⚠️ Kunne ikke finde passende patrulje-lokation for ${vehicle.navn}, bruger fallback nær station`);
+        // Fallback: Lille radius omkring stationen (sandsynligvis land)
+        const fallbackRadius = 5; // 5 km radius
+        lat = station.position.lat + (Math.random() - 0.5) * (fallbackRadius / 111.32);
+        lng = station.position.lng + (Math.random() - 0.5) * (fallbackRadius / (111.32 * Math.cos(station.position.lat * Math.PI / 180)));
+    }
     
     const destination = { lat, lng };
     vehicle.patrolDestination = destination;
@@ -506,9 +771,9 @@ function moveToRandomPatrolPoint(vehicle) {
     animateVehicleToDestination(vehicle, destination, () => {
         // Når køretøjet når destinationen, vent lidt og vælg så et nyt punkt
         if (vehicle.patrolling && vehicle.status === 'patrouillerer' && !vehicle.animationPaused) {
-            setTimeout(() => {
+            setTimeout(async () => {
                 if (!vehicle.animationPaused) {
-                    moveToRandomPatrolPoint(vehicle);
+                    await moveToRandomPatrolPoint(vehicle);
                 }
             }, 3000 + Math.random() * 7000); // Vent 3-10 sekunder
         }

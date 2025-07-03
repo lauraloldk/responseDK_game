@@ -374,17 +374,16 @@ function displayVehicleSelectionPanel(stations) {
                                             🛑
                                         </button>
                                     ` : ''}
-                                </label><br>
+                                </label>
                             `;
                         } else {
                             return `
                                 <div class="vehicle-item-disabled" data-vehicle-name="${vehicle.navn.toLowerCase()}" data-vehicle-type="${vehicle.type.toLowerCase()}" data-vehicle-status="${vehicle.status.toLowerCase()}" style="color: #888; font-style: italic;">
                                     ${vehicle.navn} (${vehicle.type}) - ${vehicle.status} (ikke tilgængelig)
-                                </div><br>
+                                </div>
                             `;
                         }
                     }).join('')}
-                </div>
                 </div>
             `).join('')}
         </div>
